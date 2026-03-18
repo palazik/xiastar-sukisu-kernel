@@ -6,15 +6,15 @@ on:
       KERNEL_SOURCE:
         description: 'Kernel source repo'
         required: true
-        default: 'MiCode/Xiaomi_Kernel_OpenSource'
+        default: 'pa-markakash/kernel_xiaomi_sm8350'
       KERNEL_BRANCH:
         description: 'Kernel source branch'
         required: true
-        default: 'star-r-oss'
+        default: 'twelve'
       SUSFS_BRANCH:
         description: 'SuSFS branch (susfs4ksu)'
         required: true
-        default: 'kernel-5.4'
+        default: 'kernel-5.10'
       SUKISU_TAG:
         description: 'SukiSU Ultra tag (empty = latest main)'
         required: false
@@ -44,7 +44,7 @@ jobs:
       ARCH: arm64
       SUBARCH: arm64
       DEVICE: star
-      DEFCONFIG: star_user_defconfig
+      DEFCONFIG: vendor/lahaina-qgki_defconfig
       TC_DIR: ${{ github.workspace }}/toolchain
       KERNEL_DIR: ${{ github.workspace }}/kernel
       ANYKERNEL_DIR: ${{ github.workspace }}/anykernel
@@ -78,6 +78,24 @@ jobs:
             -b ${{ github.event.inputs.KERNEL_BRANCH }} \
             https://github.com/${{ github.event.inputs.KERNEL_SOURCE }}.git \
             $KERNEL_DIR
+
+      - name: Detect defconfig
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          # Auto-detect correct defconfig for star (Mi 11 Ultra)
+          for cfg in \
+              vendor/lahaina-qgki_defconfig \
+              vendor/star_QGKI \
+              star_defconfig \
+              star_user_defconfig \
+              vendor/lahaina_defconfig; do
+            if [ -f "arch/arm64/configs/$cfg" ]; then
+              echo "Found defconfig: $cfg"
+              echo "DEFCONFIG=$cfg" >> $GITHUB_ENV
+              break
+            fi
+          done
+          echo "Using defconfig: $DEFCONFIG"
 
       - name: Integrate SukiSU Ultra
         working-directory: ${{ env.KERNEL_DIR }}
@@ -168,13 +186,6 @@ jobs:
           printf 'CONFIG_KSU_SUSFS_ENABLE_LOG=y\n' >> "$DCFG"
           printf 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y\n' >> "$DCFG"
           printf 'CONFIG_KSU_SUSFS_SUS_SU=y\n' >> "$DCFG"
-          # Fix: rtc_time64_to_tm undefined in perf_helper.c
-          # Enable RTC_CLASS which provides rtc_time64_to_tm in kernel 5.4
-          printf 'CONFIG_RTC_CLASS=y\n' >> "$DCFG"
-          printf 'CONFIG_RTC_HCTOSYS=y\n' >> "$DCFG"
-          # Belt-and-suspenders: disable perf_helper if still unresolved
-          printf '# CONFIG_QCOM_PERFORMANCE is not set\n' >> "$DCFG"
-          printf '# CONFIG_PERF_HELPER is not set\n' >> "$DCFG"
           printf '# Kernel version branding\n' >> "$DCFG"
           printf 'CONFIG_LOCALVERSION="-palaziks"\n' >> "$DCFG"
           printf 'CONFIG_LOCALVERSION_AUTO=n\n' >> "$DCFG"
@@ -182,26 +193,6 @@ jobs:
           printf 'CONFIG_LTO_NONE=y\n' >> "$DCFG"
           printf '# CONFIG_LTO_CLANG is not set\n' >> "$DCFG"
           echo "Kconfig entries written."
-
-      - name: Fix perf_helper rtc_time64_to_tm linker error
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          # perf_helper.c calls rtc_time64_to_tm() which is not available as a
-          # standalone symbol in this config. Remove it from the build entirely.
-          PERF_MK="drivers/misc/Makefile"
-          if [ -f "$PERF_MK" ]; then
-            sed -i 's/^obj-.*perf_helper.*$/# & # disabled: rtc_time64_to_tm missing/' "$PERF_MK"
-            echo "Patched $PERF_MK:"
-            grep -n "perf_helper" "$PERF_MK" || echo "(no perf_helper entry found)"
-          fi
-          # Also try the Qualcomm-specific misc path
-          for mk in drivers/misc/*/Makefile drivers/soc/qcom/Makefile; do
-            [ -f "$mk" ] || continue
-            if grep -q "perf_helper" "$mk"; then
-              sed -i 's/^obj-.*perf_helper.*$/# & # disabled: rtc_time64_to_tm missing/' "$mk"
-              echo "Patched $mk"
-            fi
-          done
 
       - name: Build kernel
         working-directory: ${{ env.KERNEL_DIR }}
@@ -220,16 +211,14 @@ jobs:
                OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
                CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE \
                CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-               Image.gz-dtb 2>&1 | tee build.log
+               Image 2>&1 | tee build.log
           echo "Build finished."
           ls -lh $OUT_DIR/arch/arm64/boot/
 
       - name: Package AnyKernel3 zip
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
-          cp $OUT_DIR/arch/arm64/boot/Image.gz-dtb $ANYKERNEL_DIR/ 2>/dev/null || \
-          cp $OUT_DIR/arch/arm64/boot/Image.gz     $ANYKERNEL_DIR/ 2>/dev/null || \
-          cp $OUT_DIR/arch/arm64/boot/Image        $ANYKERNEL_DIR/
+          cp $OUT_DIR/arch/arm64/boot/Image $ANYKERNEL_DIR/
           cp $OUT_DIR/arch/arm64/boot/dtbo.img $ANYKERNEL_DIR/ 2>/dev/null || true
           cp $OUT_DIR/arch/arm64/boot/dtbo     $ANYKERNEL_DIR/dtbo.img 2>/dev/null || true
           REAR="${{ github.event.inputs.DISABLE_REAR_DISPLAY }}"
@@ -255,32 +244,3 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
           retention-days: 7
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: SukiSU-${{ env.BUILD_DATE }}
-          name: "SukiSU Ultra + SuSFS | star | ${{ env.BUILD_DATE }}"
-          body: |
-            ## Mi 11 Ultra (star) — SukiSU Ultra + SuSFS
-
-            | | |
-            |---|---|
-            | **Device** | Xiaomi Mi 11 Ultra (star, SM8350/lahaina) |
-            | **Kernel** | ${{ github.event.inputs.KERNEL_SOURCE }} @ ${{ github.event.inputs.KERNEL_BRANCH }} |
-            | **Root** | SukiSU Ultra |
-            | **SuSFS** | susfs4ksu @ ${{ github.event.inputs.SUSFS_BRANCH }} |
-            | **SELinux** | Enforcing (non-permissive) |
-            | **Rear display** | ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' && 'Disabled (DTS patched)' || 'Enabled' }} |
-            | **Hook** | ${{ github.event.inputs.USE_KPROBES == 'true' && 'KProbes' || 'Manual (non-kprobes)' }} |
-            | **Built** | ${{ env.BUILD_DATE }} |
-
-            ### Installation
-            1. Flash zip via TWRP / AnyKernel3 Flasher
-            2. Install SukiSU Ultra Manager APK
-            3. *(Optional)* Install susfs4ksu module for WebUI
-
-            > Always back up your boot.img before flashing.
-          files: ${{ env.ZIP_PATH }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
