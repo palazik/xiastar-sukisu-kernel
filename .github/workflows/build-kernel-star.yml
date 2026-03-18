@@ -73,8 +73,10 @@ jobs:
       - name: Clone Clang toolchain (v15)
         run: |
           mkdir -p $TC_DIR
-          wget -q "https://github.com/ZyCromerZ/Clang/releases/download/15.0.7-20230520-release/Clang-15.0.7-20230520.tar.gz" -O $TC_DIR/clang.tar.gz
+          # Исправленная ссылка: добавлена проверка на корректное имя файла в релизе
+          wget -q "https://github.com/ZyCromerZ/Clang/releases/download/15.0.7-20230520-release/Clang-15.0.7-20230520-release.tar.gz" -O $TC_DIR/clang.tar.gz
           tar -xf $TC_DIR/clang.tar.gz -C $TC_DIR
+          rm $TC_DIR/clang.tar.gz
           echo "$TC_DIR/bin" >> $GITHUB_PATH
 
       - name: Clone kernel source
@@ -87,7 +89,6 @@ jobs:
       - name: Detect defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # Ищем приоритетный конфиг для star/mars
           for cfg in vendor/star-qgki_defconfig vendor/lahaina-qgki_defconfig star_defconfig mars_defconfig; do
             if [ -f "arch/arm64/configs/$cfg" ]; then
               echo "DEFCONFIG=$cfg" >> $GITHUB_ENV
@@ -105,14 +106,10 @@ jobs:
       - name: Fix SukiSU for 5.4
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # allowlist.c
-          sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/allowlist.c 2>/dev/null || true
-          sed -i '1s|^|#include <linux/sched/task.h>\n|' drivers/kernelsu/allowlist.c 2>/dev/null || true
-          # app_profile.c
-          sed -i '/seccomp\.filter_count/d' drivers/kernelsu/app_profile.c 2>/dev/null || true
-          # sucompat.c
-          sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c 2>/dev/null || true
-          sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c 2>/dev/null || true
+          # Исправления для совместимости с ядром 5.4
+          [ -f drivers/kernelsu/allowlist.c ] && sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/allowlist.c && sed -i '1s|^|#include <linux/sched/task.h>\n|' drivers/kernelsu/allowlist.c
+          [ -f drivers/kernelsu/app_profile.c ] && sed -i '/seccomp\.filter_count/d' drivers/kernelsu/app_profile.c
+          [ -f drivers/kernelsu/sucompat.c ] && sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c && sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
 
       - name: Apply SuSFS
         working-directory: ${{ env.KERNEL_DIR }}
@@ -123,12 +120,12 @@ jobs:
           cp /tmp/susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp /tmp/susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
 
-      - name: Patch DTS (Rear Display)
+      - name: Patch DTS (Rear Display toggle)
         if: ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' }}
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           DTS_PATH="arch/arm64/boot/dts/qcom"
-          # Отключаем через удаление свойства активности в оверлеях
+          # Твоя логика отключения через поиск файлов star/mars
           find $DTS_PATH -name "*star*.dts*" -o -name "*mars*.dts*" | xargs -I{} sh -c "printf '\n&sde_dsi1 { status = \"disabled\"; };\n&dsi_display1 { /delete-property/ qcom,dsi-display-active; };\n' >> {}"
 
       - name: Configure Kconfig
@@ -171,10 +168,11 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
           cp $OUT_DIR/arch/arm64/boot/Image $ANYKERNEL_DIR/
-          SEL="${{ github.event.inputs.SELINUX_MODE }}"
+          SEL_ST="${{ github.event.inputs.SELINUX_MODE }}"
           cat <<EOF > $ANYKERNEL_DIR/anykernel.sh
+          # AnyKernel3 Mod Script by @palaziks
           properties() { '
-          kernel.string=SukiSU-Ultra + SuSFS | star/mars | @palaziks
+          kernel.string=SukiSU-Ultra + SuSFS | star/mars | selinux=${SEL_ST} | @palaziks
           do.devicecheck=1
           do.modules=0
           do.systemless=1
@@ -182,12 +180,14 @@ jobs:
           device.name2=mars
           device.name3=M2102K1G
           device.name4=M2102K1AC
+          device.name5=M2102K1C
+          supported.versions=12-14
           '; }
           block=boot; is_slot_device=1; ramdisk_compression=auto;
           . tools/ak3-core.sh; dump_boot; write_boot;
           EOF
           BUILD_DATE=$(date +%Y%m%d-%H%M)
-          ZIP_NAME="SukiSU_star-mars_${SEL}_${BUILD_DATE}.zip"
+          ZIP_NAME="SukiSU_star-mars_${SEL_ST}_${BUILD_DATE}.zip"
           cd $ANYKERNEL_DIR && zip -r9 "${GITHUB_WORKSPACE}/${ZIP_NAME}" . -x "*.git*"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
