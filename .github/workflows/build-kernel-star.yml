@@ -190,7 +190,7 @@ jobs:
           make O=$OUT_DIR ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           export KBUILD_BUILD_USER="palaziks"
           export KBUILD_BUILD_HOST="build"
-          make -j$(nproc --all) O=$OUT_DIR ARCH=$ARCH CC=$CC LD=$LD AR=$AR NM=$NM \\
+          make -j$(nproc --all) O=$OUT_DIR ARCH=$ARCH CC=$CC LD=$LD AR=$AR NM=$NM \
                OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
                CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE \
                CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
