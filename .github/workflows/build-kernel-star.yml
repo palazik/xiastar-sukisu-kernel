@@ -288,48 +288,48 @@ jobs:
           # Write anykernel.sh
           REAR="${{ github.event.inputs.DISABLE_REAR_DISPLAY }}"
           SEL="${{ github.event.inputs.SELINUX_MODE }}"
-          cat > $ANYKERNEL_DIR/anykernel.sh << 'AKEOF'
-# AnyKernel3 Ramdisk Mod Script
-# osm0sis @ xda-developers
-
-## AnyKernel setup
-properties() { '
-AKEOF
-          printf "kernel.string=SukiSU-Ultra + SuSFS | star | selinux=${SEL} | @palaziks\n" >> $ANYKERNEL_DIR/anykernel.sh
-          cat >> $ANYKERNEL_DIR/anykernel.sh << 'AKEOF'
-do.devicecheck=1
-do.modules=0
-do.systemless=1
-do.cleanup=1
-do.cleanuponabort=0
-device.name1=star
-device.name2=M2102K1G
-device.name3=2107113SG
-supported.versions=12-14
-'; } # end properties
-
-# shell variables
-block=boot;
-is_slot_device=1;
-ramdisk_compression=auto;
-
-## AnyKernel methods (DO NOT CHANGE)
-. tools/ak3-core.sh;
-
-## AnyKernel install
-dump_boot;
-write_boot;
-## end install
-AKEOF
+          AK3="$ANYKERNEL_DIR/anykernel.sh"
+          printf '%s\n' \
+            '# AnyKernel3 Ramdisk Mod Script' \
+            '# osm0sis @ xda-developers' \
+            '' \
+            '## AnyKernel setup' \
+            "properties() { '" \
+            "kernel.string=SukiSU-Ultra + SuSFS | star | selinux=${SEL} | @palaziks" \
+            'do.devicecheck=1' \
+            'do.modules=0' \
+            'do.systemless=1' \
+            'do.cleanup=1' \
+            'do.cleanuponabort=0' \
+            'device.name1=star' \
+            'device.name2=M2102K1G' \
+            'device.name3=2107113SG' \
+            'supported.versions=12-14' \
+            "'; } # end properties" \
+            '' \
+            '# shell variables' \
+            'block=boot;' \
+            'is_slot_device=1;' \
+            'ramdisk_compression=auto;' \
+            '' \
+            '## AnyKernel methods (DO NOT CHANGE)' \
+            '. tools/ak3-core.sh;' \
+            '' \
+            '## AnyKernel install' \
+            'dump_boot;' \
+            'write_boot;' \
+            '## end install' \
+          > "$AK3"
 
           BUILD_DATE=$(date +%Y%m%d-%H%M)
           ZIP_NAME="SukiSU-Ultra_SuSFS_star_${SEL}_${BUILD_DATE}_palaziks.zip"
+          ZIP_PATH="${GITHUB_WORKSPACE}/${ZIP_NAME}"
           cd $ANYKERNEL_DIR
-          zip -r9 ${{ github.workspace }}/$ZIP_NAME . -x "*.git*" "*.github*"
-          echo "ZIP_PATH=${{ github.workspace }}/$ZIP_NAME" >> $GITHUB_ENV
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          echo "Final ZIP size: $(du -sh ${{ github.workspace }}/$ZIP_NAME | cut -f1)"
+          zip -r9 "${ZIP_PATH}" . -x "*.git*" "*.github*"
+          echo "ZIP_PATH=${ZIP_PATH}" >> $GITHUB_ENV
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+          echo "Final ZIP size: $(du -sh ${ZIP_PATH} | cut -f1)"
 
       - name: Upload AnyKernel3 zip
         uses: actions/upload-artifact@v4
