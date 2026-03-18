@@ -147,6 +147,7 @@ CONFIG_KSU_SUSFS_ENABLE_LOG=y
 CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_SUS_SU=y
 # Fix: pin LTO to None — prevents interactive kconfig prompt (CI has no stdin)
+CONFIG_RTC_LIB=y
 CONFIG_LTO_NONE=y
 # CONFIG_LTO_CLANG is not set
 EOF
