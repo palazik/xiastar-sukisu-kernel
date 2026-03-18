@@ -169,6 +169,10 @@ jobs:
           printf 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y\n' >> "$DCFG"
           printf 'CONFIG_KSU_SUSFS_SUS_SU=y\n' >> "$DCFG"
           printf 'CONFIG_RTC_LIB=y\n' >> "$DCFG"
+          printf '# Kernel version branding\n' >> "$DCFG"
+          printf 'CONFIG_LOCALVERSION="-palaziks"\n' >> "$DCFG"
+          printf 'CONFIG_LOCALVERSION_AUTO=n\n' >> "$DCFG"
+          printf 'CONFIG_BUILD_SALT="palaziks"\n' >> "$DCFG"
           printf 'CONFIG_LTO_NONE=y\n' >> "$DCFG"
           printf '# CONFIG_LTO_CLANG is not set\n' >> "$DCFG"
           echo "Kconfig entries written."
@@ -184,7 +188,9 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           make O=$OUT_DIR ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE $DEFCONFIG
           make O=$OUT_DIR ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE olddefconfig
-          make -j$(nproc --all) O=$OUT_DIR ARCH=$ARCH CC=$CC LD=$LD AR=$AR NM=$NM \
+          export KBUILD_BUILD_USER="palaziks"
+          export KBUILD_BUILD_HOST="build"
+          make -j$(nproc --all) O=$OUT_DIR ARCH=$ARCH CC=$CC LD=$LD AR=$AR NM=$NM \\
                OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
                CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE \
                CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
