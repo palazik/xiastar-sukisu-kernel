@@ -159,6 +159,7 @@ jobs:
           FILE="drivers/kernelsu/sucompat.c"
           if [ -f "$FILE" ]; then
             sed -i 's|#include <linux/pgtable.h>|#include <asm/pgtable.h>|g' "$FILE"
+            sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' "$FILE"
             echo "Patched: $FILE"
           else
             echo "File not found, skipping: $FILE"
