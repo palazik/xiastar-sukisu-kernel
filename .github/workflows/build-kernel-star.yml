@@ -14,7 +14,7 @@ on:
       SUSFS_BRANCH:
         description: 'SuSFS branch (susfs4ksu)'
         required: true
-        default: 'kernel-5.10'
+        default: 'kernel-5.4'
       SUKISU_TAG:
         description: 'SukiSU Ultra tag (empty = latest main)'
         required: false
@@ -244,3 +244,4 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
           retention-days: 7
+
