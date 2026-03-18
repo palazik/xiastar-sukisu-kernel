@@ -44,7 +44,7 @@ jobs:
       ARCH: arm64
       SUBARCH: arm64
       DEVICE: star
-      DEFCONFIG: vendor/lahaina-qgki_defconfig
+      DEFCONFIG: vendor/star-qgki_defconfig
       TC_DIR: ${{ github.workspace }}/toolchain
       KERNEL_DIR: ${{ github.workspace }}/kernel
       ANYKERNEL_DIR: ${{ github.workspace }}/anykernel
@@ -84,11 +84,11 @@ jobs:
         run: |
           # Auto-detect correct defconfig for star (Mi 11 Ultra)
           for cfg in \
+              vendor/star-qgki_defconfig \
               vendor/lahaina-qgki_defconfig \
-              vendor/star_QGKI \
+              vendor/mars_defconfig \
               star_defconfig \
-              star_user_defconfig \
-              vendor/lahaina_defconfig; do
+              star_user_defconfig; do
             if [ -f "arch/arm64/configs/$cfg" ]; then
               echo "Found defconfig: $cfg"
               echo "DEFCONFIG=$cfg" >> $GITHUB_ENV
@@ -244,4 +244,3 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
           retention-days: 7
-
