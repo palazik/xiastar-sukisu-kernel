@@ -154,6 +154,15 @@ jobs:
           else
             echo "File not found, skipping: $FILE"
           fi
+          # sucompat.c: linux/pgtable.h doesn't exist in 5.4 (added in 5.8)
+          # replace with asm/pgtable.h which exists in 5.4
+          FILE="drivers/kernelsu/sucompat.c"
+          if [ -f "$FILE" ]; then
+            sed -i 's|#include <linux/pgtable.h>|#include <asm/pgtable.h>|g' "$FILE"
+            echo "Patched: $FILE"
+          else
+            echo "File not found, skipping: $FILE"
+          fi
 
       - name: Apply SuSFS (susfs4ksu)
         working-directory: ${{ env.KERNEL_DIR }}
@@ -163,9 +172,7 @@ jobs:
           cp /tmp/susfs4ksu/kernel_patches/add_susfs_in_kernel-*.patch . 2>/dev/null || \
             cp /tmp/susfs4ksu/kernel_patches/*.patch . 2>/dev/null
           for p in *.patch; do
-            patch -p1 --no-backup-if-mismatch < "$p" || \
-            patch -p1 --no-backup-if-mismatch --fuzz=3 < "$p" || \
-            echo "WARNING: $p failed, continuing"
+            patch -p1 --no-backup-if-mismatch < "$p" ||             patch -p1 --no-backup-if-mismatch --fuzz=3 < "$p" ||             patch -p1 --no-backup-if-mismatch --fuzz=6 --ignore-whitespace < "$p" ||             echo "WARNING: $p failed, continuing"
           done
           cp /tmp/susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp /tmp/susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
