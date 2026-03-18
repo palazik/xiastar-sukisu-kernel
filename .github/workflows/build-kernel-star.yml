@@ -73,7 +73,8 @@ jobs:
       - name: Clone Clang toolchain (v15)
         run: |
           mkdir -p $TC_DIR
-          wget -q "https://github.com/ZyCromerZ/Clang/releases/download/15.0.7-20230520-release/Clang-15.0.7-20230520-release.tar.gz" -O $TC_DIR/clang.tar.gz
+          CLANG_URL=$(curl -s https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-15-link.txt)
+          wget -q "$CLANG_URL" -O $TC_DIR/clang.tar.gz
           tar -xf $TC_DIR/clang.tar.gz -C $TC_DIR
           rm $TC_DIR/clang.tar.gz
           echo "$TC_DIR/bin" >> $GITHUB_PATH
