@@ -35,6 +35,14 @@ on:
         options:
           - 'true'
           - 'false'
+      SELINUX_MODE:
+        description: 'SELinux mode'
+        required: true
+        default: 'enforcing'
+        type: choice
+        options:
+          - 'enforcing'
+          - 'permissive'
 
 jobs:
   build:
@@ -79,6 +87,17 @@ jobs:
             https://github.com/${{ github.event.inputs.KERNEL_SOURCE }}.git \
             $KERNEL_DIR
 
+      - name: Fix sde_hw_dsc_1_2 implicit-int (Clang 17 compat)
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          FILE="techpack/display/msm/sde/sde_hw_dsc_1_2.c"
+          if [ -f "$FILE" ]; then
+            sed -i 's/static inline _dsc_subblk_offset(/static inline int _dsc_subblk_offset(/' "$FILE"
+            echo "Patched: $FILE"
+          else
+            echo "File not found, skipping: $FILE"
+          fi
+
       - name: Detect defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
@@ -103,6 +122,21 @@ jobs:
           TAG="${{ github.event.inputs.SUKISU_TAG }}"
           if [ -z "$TAG" ]; then TAG="main"; fi
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/${TAG}/kernel/setup.sh" | bash -s "$TAG"
+
+      - name: Fix SukiSU allowlist.c for kernel-5.4
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          FILE="drivers/kernelsu/allowlist.c"
+          if [ -f "$FILE" ]; then
+            # TWA_RESUME doesn't exist in 5.4, replace with 0 (fire-and-forget)
+            sed -i 's/TWA_RESUME/0/g' "$FILE"
+            # Add missing include for put_task_struct
+            grep -q 'linux/sched/task.h' "$FILE" || \
+              sed -i '1s|^|#include <linux/sched/task.h>\n|' "$FILE"
+            echo "Patched: $FILE"
+          else
+            echo "File not found, skipping: $FILE"
+          fi
 
       - name: Apply SuSFS (susfs4ksu)
         working-directory: ${{ env.KERNEL_DIR }}
@@ -163,12 +197,23 @@ jobs:
             echo "Patched: $f"
           done
 
-      - name: Enforce non-permissive SELinux
+      - name: Configure SELinux mode
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          sed -i 's/CONFIG_SECURITY_SELINUX_BOOTPARAM=y/# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set/g' arch/arm64/configs/$DEFCONFIG || true
-          sed -i '/CONFIG_SECURITY_SELINUX_DEVELOP/d' arch/arm64/configs/$DEFCONFIG || true
-          sed -i 's/androidboot\.selinux=permissive//g' arch/arm64/configs/$DEFCONFIG || true
+          DCFG="arch/arm64/configs/$DEFCONFIG"
+          if [ "${{ github.event.inputs.SELINUX_MODE }}" = "enforcing" ]; then
+            echo "SELinux: enforcing"
+            sed -i 's/CONFIG_SECURITY_SELINUX_BOOTPARAM=y/# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set/g' "$DCFG" || true
+            sed -i '/CONFIG_SECURITY_SELINUX_DEVELOP/d' "$DCFG" || true
+            sed -i 's/androidboot\.selinux=permissive//g' "$DCFG" || true
+          else
+            echo "SELinux: permissive"
+            sed -i 's/# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set/CONFIG_SECURITY_SELINUX_BOOTPARAM=y/g' "$DCFG" || true
+            grep -q 'CONFIG_SECURITY_SELINUX_BOOTPARAM=y' "$DCFG" || \
+              echo 'CONFIG_SECURITY_SELINUX_BOOTPARAM=y' >> "$DCFG"
+            grep -q 'CONFIG_SECURITY_SELINUX_DEVELOP' "$DCFG" || \
+              echo 'CONFIG_SECURITY_SELINUX_DEVELOP=y' >> "$DCFG"
+          fi
 
       - name: Append KSU and SuSFS Kconfig to defconfig
         working-directory: ${{ env.KERNEL_DIR }}
@@ -222,8 +267,9 @@ jobs:
           cp $OUT_DIR/arch/arm64/boot/dtbo.img $ANYKERNEL_DIR/ 2>/dev/null || true
           cp $OUT_DIR/arch/arm64/boot/dtbo     $ANYKERNEL_DIR/dtbo.img 2>/dev/null || true
           REAR="${{ github.event.inputs.DISABLE_REAR_DISPLAY }}"
+          SEL="${{ github.event.inputs.SELINUX_MODE }}"
           printf '#!/sbin/sh\n' > $ANYKERNEL_DIR/anykernel.sh
-          printf "kernel.string=SukiSU-Ultra + SuSFS | star | rear_disabled=${REAR}\n" >> $ANYKERNEL_DIR/anykernel.sh
+          printf "kernel.string=SukiSU-Ultra + SuSFS | star | rear_disabled=${REAR} | selinux=${SEL}\n" >> $ANYKERNEL_DIR/anykernel.sh
           printf 'do.devicecheck=1\ndo.modules=0\ndo.systemless=1\n' >> $ANYKERNEL_DIR/anykernel.sh
           printf 'do.cleanup=1\ndo.cleanuponabort=0\n' >> $ANYKERNEL_DIR/anykernel.sh
           printf 'device.name1=star\ndevice.name2=M2102K1G\n' >> $ANYKERNEL_DIR/anykernel.sh
