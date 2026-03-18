@@ -146,6 +146,9 @@ CONFIG_KSU_SUSFS_SPOOF_UNAME=y
 CONFIG_KSU_SUSFS_ENABLE_LOG=y
 CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_SUS_SU=y
+# Fix: pin LTO to None — prevents interactive kconfig prompt (CI has no stdin)
+CONFIG_LTO_NONE=y
+# CONFIG_LTO_CLANG is not set
 EOF
 log_ok "Defconfig prepared."
 
@@ -271,18 +274,24 @@ export CLANG_TRIPLE=aarch64-linux-gnu-
 export CROSS_COMPILE=aarch64-linux-gnu-
 export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-# Generate .config
+# Step 1: generate base .config from defconfig
 make O="$OUT_DIR" ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
      CROSS_COMPILE=$CROSS_COMPILE $DEFCONFIG
 
-# Full build
+# Step 2: resolve any new/unset symbols non-interactively
+# Prevents LTO_CLANG "NEW symbol" interactive prompt
+make O="$OUT_DIR" ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
+     CROSS_COMPILE=$CROSS_COMPILE olddefconfig
+
+# Step 3: build kernel image
+# Note: dtbo.img is NOT a valid standalone target in MiCode star-r-oss (5.4)
 make -j"$(nproc --all)" \
      O="$OUT_DIR" ARCH=$ARCH CC=$CC LD=$LD AR=$AR NM=$NM \
      OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
      CLANG_TRIPLE=$CLANG_TRIPLE \
      CROSS_COMPILE=$CROSS_COMPILE \
      CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-     Image.gz-dtb dtbo.img 2>&1 | tee "$LOG_DIR/build.log"
+     Image.gz-dtb 2>&1 | tee "$LOG_DIR/build.log"
 
 log_ok "Build complete."
 ls -lh "$OUT_DIR/arch/arm64/boot/"
@@ -299,7 +308,9 @@ cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/" 2>/dev/null || \
 cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/" 2>/dev/null || \
 cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/"
 
+# dtbo: copy if present (not a guaranteed output in this kernel tree)
 cp "$OUT_DIR/arch/arm64/boot/dtbo.img" "$ANYKERNEL_DIR/" 2>/dev/null || true
+cp "$OUT_DIR/arch/arm64/boot/dtbo"     "$ANYKERNEL_DIR/dtbo.img" 2>/dev/null || true
 
 # Write anykernel.sh
 cat > "$ANYKERNEL_DIR/anykernel.sh" << 'AKEOF'
