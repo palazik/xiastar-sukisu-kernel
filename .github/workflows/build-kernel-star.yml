@@ -168,6 +168,7 @@ jobs:
           printf 'CONFIG_KSU_SUSFS_ENABLE_LOG=y\n' >> "$DCFG"
           printf 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y\n' >> "$DCFG"
           printf 'CONFIG_KSU_SUSFS_SUS_SU=y\n' >> "$DCFG"
+          printf 'CONFIG_RTC_LIB=y\n' >> "$DCFG"
           printf 'CONFIG_LTO_NONE=y\n' >> "$DCFG"
           printf '# CONFIG_LTO_CLANG is not set\n' >> "$DCFG"
           echo "Kconfig entries written."
