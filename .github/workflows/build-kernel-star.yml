@@ -227,20 +227,25 @@ jobs:
       - name: Append KSU / SuSFS Kconfig to defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
+          # NOTE: heredoc content must have NO leading spaces — they corrupt defconfig
           cat >> arch/arm64/configs/$DEFCONFIG << 'EOF'
-          # KernelSU / SukiSU Ultra
-          CONFIG_KSU=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_SU=y
-          EOF
+# KernelSU / SukiSU Ultra
+CONFIG_KSU=y
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_SUS_PATH=y
+CONFIG_KSU_SUSFS_SUS_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+CONFIG_KSU_SUSFS_ENABLE_LOG=y
+CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+CONFIG_KSU_SUSFS_SUS_SU=y
+# Fix: explicitly pin LTO to None — prevents interactive kconfig prompt in CI
+CONFIG_LTO_NONE=y
+# CONFIG_LTO_CLANG is not set
+EOF
+          # Resolve any new/unset symbols non-interactively
 
       # ── 10. Build kernel ────────────────────────────────────────────────────
       - name: Build kernel
@@ -258,7 +263,7 @@ jobs:
           export STRIP=llvm-strip
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # Generate .config
+          # Step 1: generate base .config from defconfig
           make O=$OUT_DIR \
                ARCH=$ARCH \
                CC=$CC \
@@ -266,7 +271,18 @@ jobs:
                CROSS_COMPILE=$CROSS_COMPILE \
                $DEFCONFIG
 
-          # Build
+          # Step 2: resolve any remaining unset symbols non-interactively
+          # This prevents the LTO_CLANG "NEW symbol" interactive prompt in CI
+          make O=$OUT_DIR \
+               ARCH=$ARCH \
+               CC=$CC \
+               CLANG_TRIPLE=$CLANG_TRIPLE \
+               CROSS_COMPILE=$CROSS_COMPILE \
+               olddefconfig
+
+          # Step 3: build kernel image
+          # Note: dtbo.img is NOT a valid standalone target in MiCode star-r-oss (5.4)
+          # dtbo is embedded in Image.gz-dtb / built as part of dtbs
           make -j$(nproc --all) \
                O=$OUT_DIR \
                ARCH=$ARCH \
@@ -280,7 +296,7 @@ jobs:
                CLANG_TRIPLE=$CLANG_TRIPLE \
                CROSS_COMPILE=$CROSS_COMPILE \
                CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-               Image.gz-dtb dtbo.img 2>&1 | tee build.log
+               Image.gz-dtb 2>&1 | tee build.log
 
           echo "Build finished."
           ls -lh $OUT_DIR/arch/arm64/boot/
@@ -301,7 +317,9 @@ jobs:
           cp $OUT_DIR/arch/arm64/boot/Image.gz      $ANYKERNEL_DIR/ 2>/dev/null || \
           cp $OUT_DIR/arch/arm64/boot/Image          $ANYKERNEL_DIR/
 
+          # dtbo.img: copy if it exists (not guaranteed in this kernel tree)
           cp $OUT_DIR/arch/arm64/boot/dtbo.img $ANYKERNEL_DIR/ 2>/dev/null || true
+          cp $OUT_DIR/arch/arm64/boot/dtbo     $ANYKERNEL_DIR/dtbo.img 2>/dev/null || true
 
           # Write AnyKernel config
           cat > $ANYKERNEL_DIR/anykernel.sh << 'AKEOF'
