@@ -16,17 +16,17 @@ on:
         required: true
         default: 'kernel-5.4'
       SUKISU_TAG:
-        description: 'SukiSU Ultra tag (empty = latest)'
+        description: 'SukiSU Ultra tag (empty = latest main)'
         required: false
         default: ''
       USE_KPROBES:
-        description: 'Use kprobes hook (false = manual hook, more stable)'
+        description: 'Use kprobes hook (false = manual, more stable)'
         required: true
         default: 'false'
         type: choice
         options:
-          - 'true'
           - 'false'
+          - 'true'
       DISABLE_REAR_DISPLAY:
         description: 'Disable rear (secondary) display in DTS'
         required: true
@@ -45,21 +45,18 @@ jobs:
       SUBARCH: arm64
       DEVICE: star
       DEFCONFIG: star_user_defconfig
-      CLANG_VERSION: r416183b
       TC_DIR: ${{ github.workspace }}/toolchain
       KERNEL_DIR: ${{ github.workspace }}/kernel
       ANYKERNEL_DIR: ${{ github.workspace }}/anykernel
       OUT_DIR: ${{ github.workspace }}/out
 
     steps:
-      # ── 1. Free disk space ──────────────────────────────────────────────────
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           sudo apt-get clean
           df -h
 
-      # ── 2. Install dependencies ─────────────────────────────────────────────
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
@@ -68,293 +65,157 @@ jobs:
             libelf-dev libssl-dev lld llvm make python3 \
             unzip wget zip zlib1g-dev
 
-      # ── 3. Clone Clang toolchain ────────────────────────────────────────────
-      - name: Clone Clang toolchain (AOSP ${{ env.CLANG_VERSION }})
+      - name: Clone Clang toolchain
         run: |
           mkdir -p $TC_DIR
-          wget -q \
-            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-${{ env.CLANG_VERSION }}.tar.gz" \
-            -O $TC_DIR/clang.tar.gz || \
-          wget -q \
-            "https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230607-release/Clang-17.0.0-20230607.tar.gz" \
-            -O $TC_DIR/clang.tar.gz
+          wget -q "https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230607-release/Clang-17.0.0-20230607.tar.gz" -O $TC_DIR/clang.tar.gz
           tar -xf $TC_DIR/clang.tar.gz -C $TC_DIR
-          echo "CLANG_PATH=$TC_DIR/bin" >> $GITHUB_ENV
-          echo "PATH=$TC_DIR/bin:$PATH" >> $GITHUB_ENV
+          echo "$TC_DIR/bin" >> $GITHUB_PATH
 
-      # ── 4. Clone kernel source ──────────────────────────────────────────────
       - name: Clone kernel source
         run: |
           git clone --depth=1 \
             -b ${{ github.event.inputs.KERNEL_BRANCH }} \
             https://github.com/${{ github.event.inputs.KERNEL_SOURCE }}.git \
             $KERNEL_DIR
-          echo "KERNEL_VERSION=$(make -C $KERNEL_DIR kernelversion 2>/dev/null | head -1)" >> $GITHUB_ENV
 
-      # ── 5. Integrate SukiSU Ultra ───────────────────────────────────────────
       - name: Integrate SukiSU Ultra
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          if [ -n "${{ github.event.inputs.SUKISU_TAG }}" ]; then
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/${{ github.event.inputs.SUKISU_TAG }}/kernel/setup.sh" | bash -s "${{ github.event.inputs.SUKISU_TAG }}"
-          else
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-          fi
-          echo "SukiSU integrated: $(cat KernelSU/kernel/Makefile | grep 'KERNELSU_VERSION' | head -1)"
+          TAG="${{ github.event.inputs.SUKISU_TAG }}"
+          if [ -z "$TAG" ]; then TAG="main"; fi
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/${TAG}/kernel/setup.sh" | bash -s "$TAG"
 
-      # ── 6. Clone & apply SuSFS patch ────────────────────────────────────────
       - name: Apply SuSFS (susfs4ksu)
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # Clone susfs4ksu
-          git clone --depth=1 \
-            -b ${{ github.event.inputs.SUSFS_BRANCH }} \
-            https://gitlab.com/simonpunk/susfs4ksu.git \
-            /tmp/susfs4ksu
-
-          # Copy kernel patches
+          git clone --depth=1 -b ${{ github.event.inputs.SUSFS_BRANCH }} \
+            https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
           cp /tmp/susfs4ksu/kernel_patches/add_susfs_in_kernel-*.patch . 2>/dev/null || \
-          cp /tmp/susfs4ksu/kernel_patches/*.patch . 2>/dev/null
-
-          # Apply patches (tolerate fuzz)
+            cp /tmp/susfs4ksu/kernel_patches/*.patch . 2>/dev/null
           for p in *.patch; do
-            echo "Applying patch: $p"
             patch -p1 --no-backup-if-mismatch < "$p" || \
             patch -p1 --no-backup-if-mismatch --fuzz=3 < "$p" || \
-            echo "WARNING: patch $p failed to apply cleanly, continuing..."
+            echo "WARNING: $p failed, continuing"
           done
-
-          # Copy SuSFS source files
           cp /tmp/susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp /tmp/susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp /tmp/susfs4ksu/kernel_patches/fs/sus_su.c fs/ 2>/dev/null || true
           cp /tmp/susfs4ksu/kernel_patches/include/linux/sus_su.h include/linux/ 2>/dev/null || true
 
-          echo "SuSFS applied."
-
-      # ── 7. KProbes / manual hook selection ─────────────────────────────────
       - name: Configure hook method
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           if [ "${{ github.event.inputs.USE_KPROBES }}" = "true" ]; then
             echo "CONFIG_KSU_WITH_KPROBES=y" >> arch/arm64/configs/$DEFCONFIG
-            echo "Using KProbes hook"
           else
-            # Manual (non-kprobes) hook – patch syscall table directly
-            # SukiSU already handles this when kprobes config is absent
             echo "# CONFIG_KSU_WITH_KPROBES is not set" >> arch/arm64/configs/$DEFCONFIG
-            echo "Using manual (non-kprobes) hook"
           fi
 
-      # ── 8. Disable rear (secondary) display in DTS ─────────────────────────
       - name: Disable rear display in DTS
         if: ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' }}
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           DTS_DIR="arch/arm64/boot/dts/qcom"
-          echo "Searching for secondary display nodes..."
-
-          # Remove qcom,dsi-display-active from secondary display nodes
-          for dtsi_file in \
-              "$DTS_DIR/lahaina-sde-display.dtsi" \
-              "$DTS_DIR/star-sde-display.dtsi" \
-              "$DTS_DIR/lahaina-star-sde-display.dtsi"; do
-            if [ -f "$dtsi_file" ]; then
-              echo "Found: $dtsi_file"
-              python3 - "$dtsi_file" << 'PYEOF'
-          import re, sys
-          path = sys.argv[1]
-          with open(path) as f:
-              content = f.read()
-          # Remove active flag from nodes with display-type = "secondary"
-          modified = re.sub(
-              r'(qcom,display-type\s*=\s*"secondary"[^}]*?)(^\s*qcom,dsi-display-active;\n)',
-              r'\1',
-              content, flags=re.MULTILINE|re.DOTALL
-          )
-          if modified == content:
-              # Fallback: comment out 2nd+ occurrences
-              lines = content.split('\n')
-              found, out = 0, []
-              for line in lines:
-                  if 'qcom,dsi-display-active' in line:
+          for f in "$DTS_DIR/lahaina-sde-display.dtsi" "$DTS_DIR/star-sde-display.dtsi" "$DTS_DIR/lahaina-star-sde-display.dtsi"; do
+            [ -f "$f" ] || continue
+            echo "Patching: $f"
+            python3 -c "
+          import re
+          path = '$f'
+          c = open(path).read()
+          m = re.sub(r'(qcom,display-type\s*=\s*\"secondary\"[^}]*?)(^\s*qcom,dsi-display-active;\n)', r'\\1', c, flags=re.M|re.S)
+          if m == c:
+              lines = c.split('\n'); found = 0; out = []
+              for l in lines:
+                  if 'qcom,dsi-display-active' in l:
                       found += 1
                       if found > 1:
-                          out.append('/* rear display disabled */ //' + line.lstrip())
+                          out.append('/* rear disabled */')
                           continue
-                  out.append(line)
-              modified = '\n'.join(out)
-          with open(path, 'w') as f:
-              f.write(modified)
-          print("Done:", path)
-          PYEOF
-            fi
+                  out.append(l)
+              m = '\n'.join(out)
+          open(path, 'w').write(m)
+          print('patched:', path)
+          "
+          done
+          for f in "$DTS_DIR/lahaina-star.dts" "$DTS_DIR/lahaina-star-v2.dts" "$DTS_DIR/lahaina-star-v2-overlay.dts"; do
+            [ -f "$f" ] || continue
+            printf '\n/* rear display disabled */\n&sde_dsi1 { status = "disabled"; };\n&dsi_display1 { /delete-property/ qcom,dsi-display-active; };\n' >> "$f"
+            echo "Patched: $f"
           done
 
-          # Inject status=disabled override into board-level DTS
-          for dts in \
-              "$DTS_DIR/lahaina-star.dts" \
-              "$DTS_DIR/lahaina-star-v2.dts" \
-              "$DTS_DIR/lahaina-star-v2-overlay.dts"; do
-            if [ -f "$dts" ]; then
-              cat >> "$dts" << 'DTSEOF'
-          /* rear display disabled */
-          &sde_dsi1 { status = "disabled"; };
-          &dsi_display1 { /delete-property/ qcom,dsi-display-active; };
-          DTSEOF
-              echo "Patched: $dts"
-            fi
-          done
-          echo "Rear display disable complete."
-
-      # ── 9. Enforce enforcing SELinux (non-permissive) ───────────────────────
       - name: Enforce non-permissive SELinux
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # Remove any existing permissive overrides
-          sed -i 's/CONFIG_SECURITY_SELINUX_BOOTPARAM=y/# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set/g' \
-            arch/arm64/configs/$DEFCONFIG || true
-          sed -i '/CONFIG_SECURITY_SELINUX_DEVELOP/d' \
-            arch/arm64/configs/$DEFCONFIG || true
+          sed -i 's/CONFIG_SECURITY_SELINUX_BOOTPARAM=y/# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set/g' arch/arm64/configs/$DEFCONFIG || true
+          sed -i '/CONFIG_SECURITY_SELINUX_DEVELOP/d' arch/arm64/configs/$DEFCONFIG || true
+          sed -i 's/androidboot\.selinux=permissive//g' arch/arm64/configs/$DEFCONFIG || true
 
-          # Also remove any androidboot.selinux=permissive from cmdline
-          sed -i 's/androidboot\.selinux=permissive//g' \
-            arch/arm64/configs/$DEFCONFIG || true
-
-          echo "SELinux: enforcing mode confirmed"
-
-      # ── 9. Apply KernelSU + SuSFS Kconfig entries ──────────────────────────
-      - name: Append KSU / SuSFS Kconfig to defconfig
+      - name: Append KSU and SuSFS Kconfig to defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # NOTE: heredoc content must have NO leading spaces — they corrupt defconfig
-          cat >> arch/arm64/configs/$DEFCONFIG << 'EOF'
-# KernelSU / SukiSU Ultra
-CONFIG_KSU=y
-CONFIG_KSU_SUSFS=y
-CONFIG_KSU_SUSFS_SUS_PATH=y
-CONFIG_KSU_SUSFS_SUS_MOUNT=y
-CONFIG_KSU_SUSFS_SUS_KSTAT=y
-CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-CONFIG_KSU_SUSFS_ENABLE_LOG=y
-CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-CONFIG_KSU_SUSFS_SUS_SU=y
-# Fix: explicitly pin LTO to None — prevents interactive kconfig prompt in CI
-CONFIG_LTO_NONE=y
-# CONFIG_LTO_CLANG is not set
-EOF
-          # Resolve any new/unset symbols non-interactively
+          DCFG="arch/arm64/configs/$DEFCONFIG"
+          printf '\n# SukiSU Ultra + SuSFS\n' >> "$DCFG"
+          printf 'CONFIG_KSU=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_SUS_PATH=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_SUS_MOUNT=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_SUS_KSTAT=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_TRY_UMOUNT=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_ENABLE_LOG=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y\n' >> "$DCFG"
+          printf 'CONFIG_KSU_SUSFS_SUS_SU=y\n' >> "$DCFG"
+          printf 'CONFIG_LTO_NONE=y\n' >> "$DCFG"
+          printf '# CONFIG_LTO_CLANG is not set\n' >> "$DCFG"
+          echo "Kconfig entries written."
 
-      # ── 10. Build kernel ────────────────────────────────────────────────────
       - name: Build kernel
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           mkdir -p $OUT_DIR
+          export CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm
+          export OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
+          export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export CC=clang
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export STRIP=llvm-strip
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-
-          # Step 1: generate base .config from defconfig
-          make O=$OUT_DIR \
-               ARCH=$ARCH \
-               CC=$CC \
-               CLANG_TRIPLE=$CLANG_TRIPLE \
-               CROSS_COMPILE=$CROSS_COMPILE \
-               $DEFCONFIG
-
-          # Step 2: resolve any remaining unset symbols non-interactively
-          # This prevents the LTO_CLANG "NEW symbol" interactive prompt in CI
-          make O=$OUT_DIR \
-               ARCH=$ARCH \
-               CC=$CC \
-               CLANG_TRIPLE=$CLANG_TRIPLE \
-               CROSS_COMPILE=$CROSS_COMPILE \
-               olddefconfig
-
-          # Step 3: build kernel image
-          # Note: dtbo.img is NOT a valid standalone target in MiCode star-r-oss (5.4)
-          # dtbo is embedded in Image.gz-dtb / built as part of dtbs
-          make -j$(nproc --all) \
-               O=$OUT_DIR \
-               ARCH=$ARCH \
-               CC=$CC \
-               LD=$LD \
-               AR=$AR \
-               NM=$NM \
-               OBJCOPY=$OBJCOPY \
-               OBJDUMP=$OBJDUMP \
-               STRIP=$STRIP \
-               CLANG_TRIPLE=$CLANG_TRIPLE \
-               CROSS_COMPILE=$CROSS_COMPILE \
+          make O=$OUT_DIR ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE $DEFCONFIG
+          make O=$OUT_DIR ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE olddefconfig
+          make -j$(nproc --all) O=$OUT_DIR ARCH=$ARCH CC=$CC LD=$LD AR=$AR NM=$NM \
+               OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
+               CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE \
                CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
                Image.gz-dtb 2>&1 | tee build.log
-
           echo "Build finished."
           ls -lh $OUT_DIR/arch/arm64/boot/
 
-      # ── 11. Clone AnyKernel3 ────────────────────────────────────────────────
-      - name: Clone AnyKernel3
-        run: |
-          git clone --depth=1 \
-            https://github.com/osm0sis/AnyKernel3.git \
-            $ANYKERNEL_DIR
-          # Trim unneeded ramdisks
-          rm -f $ANYKERNEL_DIR/ramdisk/patch/dummy
-
-      # ── 12. Package AnyKernel zip ────────────────────────────────────────────
       - name: Package AnyKernel3 zip
         run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
           cp $OUT_DIR/arch/arm64/boot/Image.gz-dtb $ANYKERNEL_DIR/ 2>/dev/null || \
-          cp $OUT_DIR/arch/arm64/boot/Image.gz      $ANYKERNEL_DIR/ 2>/dev/null || \
-          cp $OUT_DIR/arch/arm64/boot/Image          $ANYKERNEL_DIR/
-
-          # dtbo.img: copy if it exists (not guaranteed in this kernel tree)
+          cp $OUT_DIR/arch/arm64/boot/Image.gz     $ANYKERNEL_DIR/ 2>/dev/null || \
+          cp $OUT_DIR/arch/arm64/boot/Image        $ANYKERNEL_DIR/
           cp $OUT_DIR/arch/arm64/boot/dtbo.img $ANYKERNEL_DIR/ 2>/dev/null || true
           cp $OUT_DIR/arch/arm64/boot/dtbo     $ANYKERNEL_DIR/dtbo.img 2>/dev/null || true
-
-          # Write AnyKernel config
-          cat > $ANYKERNEL_DIR/anykernel.sh << 'AKEOF'
-          # AnyKernel3 config - Mi 11 Ultra (star)
-          properties() { '
-          kernel.string=SukiSU-Ultra + SuSFS @ star (Mi 11 Ultra)
-          do.devicecheck=1
-          do.modules=0
-          do.systemless=1
-          do.cleanup=1
-          do.cleanuponabort=0
-          device.name1=star
-          device.name2=M2102K1G
-          supported.versions=
-          supported.patchlevels=
-          '; }
-
-          block=/dev/block/bootdevice/by-name/boot
-          is_slot_device=1
-          ramdisk_compression=auto
-          patch_vbmeta_flag=auto
-
-          . tools/ak3-core.sh
-          . tools/flasher.sh
-          AKEOF
-
+          REAR="${{ github.event.inputs.DISABLE_REAR_DISPLAY }}"
+          printf '#!/sbin/sh\n' > $ANYKERNEL_DIR/anykernel.sh
+          printf "kernel.string=SukiSU-Ultra + SuSFS | star | rear_disabled=${REAR}\n" >> $ANYKERNEL_DIR/anykernel.sh
+          printf 'do.devicecheck=1\ndo.modules=0\ndo.systemless=1\n' >> $ANYKERNEL_DIR/anykernel.sh
+          printf 'do.cleanup=1\ndo.cleanuponabort=0\n' >> $ANYKERNEL_DIR/anykernel.sh
+          printf 'device.name1=star\ndevice.name2=M2102K1G\n' >> $ANYKERNEL_DIR/anykernel.sh
+          printf 'block=/dev/block/bootdevice/by-name/boot\n' >> $ANYKERNEL_DIR/anykernel.sh
+          printf 'is_slot_device=1\nramdisk_compression=auto\npatch_vbmeta_flag=auto\n' >> $ANYKERNEL_DIR/anykernel.sh
+          printf '. tools/ak3-core.sh\n. tools/flasher.sh\n' >> $ANYKERNEL_DIR/anykernel.sh
           BUILD_DATE=$(date +%Y%m%d-%H%M)
           ZIP_NAME="AnyKernel3_SukiSU-Ultra_SuSFS_star_${BUILD_DATE}.zip"
           cd $ANYKERNEL_DIR
-          zip -r9 ../$ZIP_NAME . -x "*.git*" "*.github*"
+          zip -r9 ${{ github.workspace }}/$ZIP_NAME . -x "*.git*" "*.github*"
           echo "ZIP_PATH=${{ github.workspace }}/$ZIP_NAME" >> $GITHUB_ENV
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
 
-      # ── 13. Upload as artifact ──────────────────────────────────────────────
       - name: Upload AnyKernel3 zip
         uses: actions/upload-artifact@v4
         with:
@@ -362,7 +223,6 @@ EOF
           path: ${{ env.ZIP_PATH }}
           retention-days: 7
 
-      # ── 14. Create GitHub Release ───────────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -374,21 +234,20 @@ EOF
             | | |
             |---|---|
             | **Device** | Xiaomi Mi 11 Ultra (star, SM8350/lahaina) |
-            | **Kernel source** | ${{ github.event.inputs.KERNEL_SOURCE }} @ ${{ github.event.inputs.KERNEL_BRANCH }} |
-            | **Root** | SukiSU Ultra (KernelSU fork) |
+            | **Kernel** | ${{ github.event.inputs.KERNEL_SOURCE }} @ ${{ github.event.inputs.KERNEL_BRANCH }} |
+            | **Root** | SukiSU Ultra |
             | **SuSFS** | susfs4ksu @ ${{ github.event.inputs.SUSFS_BRANCH }} |
-            | **SELinux** | **Enforcing** (non-permissive) |
-            | **Rear display** | ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' && '**Disabled** (DTS patched)' || 'Enabled' }} |
+            | **SELinux** | Enforcing (non-permissive) |
+            | **Rear display** | ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' && 'Disabled (DTS patched)' || 'Enabled' }} |
             | **Hook** | ${{ github.event.inputs.USE_KPROBES == 'true' && 'KProbes' || 'Manual (non-kprobes)' }} |
             | **Built** | ${{ env.BUILD_DATE }} |
 
             ### Installation
             1. Flash zip via TWRP / AnyKernel3 Flasher
             2. Install SukiSU Ultra Manager APK
-            3. *(Optional)* Install `susfs4ksu-module` for WebUI
+            3. *(Optional)* Install susfs4ksu module for WebUI
 
-            > ⚠️ Always back up your `boot.img` before flashing.
+            > Always back up your boot.img before flashing.
           files: ${{ env.ZIP_PATH }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
