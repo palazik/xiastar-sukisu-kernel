@@ -127,10 +127,11 @@ jobs:
             sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
           fi
           # pkg_observer.c: fsnotify API incompatible with 5.4
-          # Exclude from build via Makefile - pkg_observer is non-critical (app package tracking)
-          if [ -f drivers/kernelsu/Makefile ]; then
-            sed -i '/pkg_observer/d' drivers/kernelsu/Makefile
-            echo "Excluded pkg_observer.c from build"
+          # Replace with empty stub - non-critical (only tracks app installs for allowlist)
+          if [ -f drivers/kernelsu/pkg_observer.c ]; then
+            printf '%s
+'               '// pkg_observer stubbed for kernel-5.4 compatibility'               '#include <linux/kernel.h>'               'void ksu_pkg_observer_init(void) {}'               'void ksu_pkg_observer_exit(void) {}'             > drivers/kernelsu/pkg_observer.c
+            echo "Stubbed: drivers/kernelsu/pkg_observer.c"
           fi
 
       - name: Apply SuSFS
