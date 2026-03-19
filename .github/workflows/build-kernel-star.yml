@@ -129,8 +129,10 @@ jobs:
           # pkg_observer.c: fsnotify API incompatible with 5.4
           # Replace with empty stub - non-critical (only tracks app installs for allowlist)
           if [ -f drivers/kernelsu/pkg_observer.c ]; then
-            printf '%s
-'               '// pkg_observer stubbed for kernel-5.4 compatibility'               '#include <linux/kernel.h>'               'void ksu_pkg_observer_init(void) {}'               'void ksu_pkg_observer_exit(void) {}'             > drivers/kernelsu/pkg_observer.c
+            echo "// pkg_observer stubbed for kernel-5.4" > drivers/kernelsu/pkg_observer.c
+            echo "#include <linux/kernel.h>" >> drivers/kernelsu/pkg_observer.c
+            echo "void ksu_pkg_observer_init(void) {}" >> drivers/kernelsu/pkg_observer.c
+            echo "void ksu_pkg_observer_exit(void) {}" >> drivers/kernelsu/pkg_observer.c
             echo "Stubbed: drivers/kernelsu/pkg_observer.c"
           fi
 
