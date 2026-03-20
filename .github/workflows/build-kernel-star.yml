@@ -70,10 +70,10 @@ jobs:
             libelf-dev libssl-dev lld llvm make python3 \
             unzip wget zip zlib1g-dev
 
-      - name: Clone Clang toolchain (v15)
+      - name: Clone Clang toolchain (v17)
         run: |
           mkdir -p $TC_DIR
-          CLANG_URL=$(curl -s https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-15-link.txt)
+          CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230607-release/Clang-17.0.0-20230607.tar.gz"
           wget -q "$CLANG_URL" -O $TC_DIR/clang.tar.gz
           tar -xf $TC_DIR/clang.tar.gz -C $TC_DIR
           rm $TC_DIR/clang.tar.gz
@@ -129,10 +129,12 @@ jobs:
           # pkg_observer.c: fsnotify API incompatible with 5.4
           # Replace with empty stub - non-critical (only tracks app installs for allowlist)
           if [ -f drivers/kernelsu/pkg_observer.c ]; then
-            echo "// pkg_observer stubbed for kernel-5.4" > drivers/kernelsu/pkg_observer.c
-            echo "#include <linux/kernel.h>" >> drivers/kernelsu/pkg_observer.c
-            echo "void ksu_pkg_observer_init(void) {}" >> drivers/kernelsu/pkg_observer.c
-            echo "void ksu_pkg_observer_exit(void) {}" >> drivers/kernelsu/pkg_observer.c
+            cat > drivers/kernelsu/pkg_observer.c << 'EOF'
+// pkg_observer stubbed for kernel-5.4
+#include <linux/kernel.h>
+void ksu_pkg_observer_init(void) {}
+void ksu_pkg_observer_exit(void) {}
+EOF
             echo "Stubbed: drivers/kernelsu/pkg_observer.c"
           fi
 
@@ -222,14 +224,20 @@ jobs:
                CLANG_TRIPLE=$CLANG_TRIPLE \
                CROSS_COMPILE=$CROSS_COMPILE \
                CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-               Image 2>&1 | tee build.log
+               Image.gz-dtb dtbs 2>&1 | tee build.log
           echo "--- Boot artifacts ---"
           ls -lh $OUT_DIR/arch/arm64/boot/
 
       - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
-          cp $OUT_DIR/arch/arm64/boot/Image $ANYKERNEL_DIR/
+          # Copy kernel image (try multiple variants)
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/" 2>/dev/null || \
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/" 2>/dev/null || \
+          cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/"
+          # Copy dtbo if exists
+          cp "$OUT_DIR/arch/arm64/boot/dtbo.img" "$ANYKERNEL_DIR/" 2>/dev/null || true
+          cp "$OUT_DIR/arch/arm64/boot/dtbo"     "$ANYKERNEL_DIR/dtbo.img" 2>/dev/null || true
           SEL="${{ github.event.inputs.SELINUX_MODE }}"
           printf '%s\n' \
             '# AnyKernel3 Ramdisk Mod Script' \
@@ -247,7 +255,7 @@ jobs:
             'device.name3=M2102K1G' \
             'device.name4=M2102K1AC' \
             'device.name5=M2102K1C' \
-            'supported.versions=12-14' \
+            'supported.versions=11-14' \
             "'; } # end properties" \
             '' \
             'block=boot;' \

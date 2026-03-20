@@ -66,7 +66,7 @@ if [ ! -d "$KERNEL_DIR/.git" ]; then
 else
     log_ok "Kernel source already cloned."
 fi
-KVER=$(make -C "$KERNEL_DIR" kernelversion 2>/dev/null | head -1)
+KVER=$(make -C "$KERNEL_DIR" ARCH=$ARCH kernelversion 2>/dev/null | head -1)
 log_ok "Kernel version: $KVER"
 
 # ── 4. Integrate SukiSU Ultra ────────────────────────────────
@@ -82,6 +82,42 @@ else
         | bash -s main
 fi
 log_ok "SukiSU integrated."
+
+# ── 4b. Compatibility fixes ──────────────────────────────────
+log_info "Applying compatibility fixes..."
+cd "$KERNEL_DIR"
+
+# Fix techpack implicit-int (Clang compat)
+for f in \
+    "techpack/display/msm/sde/sde_hw_dsc_1_2.c:_dsc_subblk_offset" \
+    "techpack/display/msm/sde/sde_hw_vdc.c:_vdc_subblk_offset"; do
+    file="${f%%:*}"; func="${f##*:}"
+    [ -f "$file" ] && sed -i "s/static inline ${func}(/static inline int ${func}(/" "$file" && log_ok "Patched: $file"
+done
+
+# Fix SukiSU for kernel-5.4
+if [ -f drivers/kernelsu/allowlist.c ]; then
+    sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/allowlist.c
+    grep -q 'linux/sched/task.h' drivers/kernelsu/allowlist.c || \
+        sed -i '1s|^|#include <linux/sched/task.h>\n|' drivers/kernelsu/allowlist.c
+fi
+[ -f drivers/kernelsu/app_profile.c ] && \
+    sed -i '/seccomp\.filter_count/d' drivers/kernelsu/app_profile.c
+if [ -f drivers/kernelsu/sucompat.c ]; then
+    sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c
+    sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
+fi
+# pkg_observer.c: fsnotify API incompatible with 5.4 (replace with empty stub)
+if [ -f drivers/kernelsu/pkg_observer.c ]; then
+    cat > drivers/kernelsu/pkg_observer.c << 'EOF'
+// pkg_observer stubbed for kernel-5.4
+#include <linux/kernel.h>
+void ksu_pkg_observer_init(void) {}
+void ksu_pkg_observer_exit(void) {}
+EOF
+    log_ok "Stubbed: drivers/kernelsu/pkg_observer.c"
+fi
+log_ok "Compatibility fixes applied."
 
 # ── 5. Apply SuSFS ──────────────────────────────────────────
 log_info "Applying SuSFS patches ($SUSFS_BRANCH)..."
@@ -101,7 +137,8 @@ for patch_file in *.patch; do
     elif patch -p1 --no-backup-if-mismatch --fuzz=3 < "$patch_file"; then
         log_warn "Patch applied with fuzz: $patch_file"
     else
-        log_warn "Patch failed (non-fatal): $patch_file"
+        log_error "Patch failed: $patch_file"
+        exit 1
     fi
 done
 
@@ -292,7 +329,7 @@ make -j"$(nproc --all)" \
      CLANG_TRIPLE=$CLANG_TRIPLE \
      CROSS_COMPILE=$CROSS_COMPILE \
      CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-     Image.gz-dtb 2>&1 | tee "$LOG_DIR/build.log"
+     Image.gz-dtb dtbs 2>&1 | tee "$LOG_DIR/build.log"
 
 log_ok "Build complete."
 ls -lh "$OUT_DIR/arch/arm64/boot/"
@@ -324,8 +361,11 @@ do.systemless=1
 do.cleanup=1
 do.cleanuponabort=0
 device.name1=star
-device.name2=M2102K1G
-supported.versions=
+device.name2=mars
+device.name3=M2102K1G
+device.name4=M2102K1AC
+device.name5=M2102K1C
+supported.versions=11-14
 supported.patchlevels=
 '; }
 
@@ -335,7 +375,9 @@ ramdisk_compression=auto
 patch_vbmeta_flag=auto
 
 . tools/ak3-core.sh
-. tools/flasher.sh
+
+dump_boot;
+write_boot;
 AKEOF
 
 BUILD_DATE=$(date +%Y%m%d-%H%M)
