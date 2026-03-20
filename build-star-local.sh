@@ -45,10 +45,10 @@ sudo apt-get install -y --no-install-recommends \
     unzip wget zip zlib1g-dev aarch64-linux-gnu-gcc \
     gcc-arm-linux-gnueabi 2>&1 | tee "$LOG_DIR/deps.log"
 
-# ── 2. Toolchain (ZyCromerZ Clang 17) ───────────────────────
+# ── 2. Toolchain (ZyCromerZ Clang 15) ───────────────────────
 if [ ! -f "$TC_DIR/bin/clang" ]; then
-    log_info "Downloading Clang 17 toolchain..."
-    CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230607-release/Clang-17.0.0-20230607.tar.gz"
+    log_info "Downloading Clang 15 toolchain..."
+    CLANG_URL=$(curl -s https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-15-link.txt)
     wget -q --show-progress "$CLANG_URL" -O "$TC_DIR/clang.tar.gz"
     tar -xf "$TC_DIR/clang.tar.gz" -C "$TC_DIR"
     rm "$TC_DIR/clang.tar.gz"
@@ -329,7 +329,7 @@ make -j"$(nproc --all)" \
      CLANG_TRIPLE=$CLANG_TRIPLE \
      CROSS_COMPILE=$CROSS_COMPILE \
      CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-     Image.gz-dtb dtbs 2>&1 | tee "$LOG_DIR/build.log"
+     Image.gz-dtb 2>&1 | tee "$LOG_DIR/build.log"
 
 log_ok "Build complete."
 ls -lh "$OUT_DIR/arch/arm64/boot/"
@@ -341,10 +341,10 @@ if [ ! -d "$ANYKERNEL_DIR/.git" ]; then
     git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "$ANYKERNEL_DIR"
 fi
 
-# Copy kernel image
-cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/" 2>/dev/null || \
-cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/" 2>/dev/null || \
-cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/"
+# Copy kernel image (try multiple variants)
+cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/Image" 2>/dev/null || \
+cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/Image" 2>/dev/null || \
+cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/Image"
 
 # dtbo: copy if present (not a guaranteed output in this kernel tree)
 cp "$OUT_DIR/arch/arm64/boot/dtbo.img" "$ANYKERNEL_DIR/" 2>/dev/null || true

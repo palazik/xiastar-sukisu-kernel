@@ -70,10 +70,10 @@ jobs:
             libelf-dev libssl-dev lld llvm make python3 \
             unzip wget zip zlib1g-dev
 
-      - name: Clone Clang toolchain (v17)
+      - name: Clone Clang toolchain (v15)
         run: |
           mkdir -p $TC_DIR
-          CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230607-release/Clang-17.0.0-20230607.tar.gz"
+          CLANG_URL=$(curl -s https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-15-link.txt)
           wget -q "$CLANG_URL" -O $TC_DIR/clang.tar.gz
           tar -xf $TC_DIR/clang.tar.gz -C $TC_DIR
           rm $TC_DIR/clang.tar.gz
@@ -100,7 +100,9 @@ jobs:
       - name: Fix techpack implicit-int (Clang compat)
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          for f in             "techpack/display/msm/sde/sde_hw_dsc_1_2.c:_dsc_subblk_offset"             "techpack/display/msm/sde/sde_hw_vdc.c:_vdc_subblk_offset"; do
+          for f in \
+            "techpack/display/msm/sde/sde_hw_dsc_1_2.c:_dsc_subblk_offset" \
+            "techpack/display/msm/sde/sde_hw_vdc.c:_vdc_subblk_offset"; do
             file="${f%%:*}"; func="${f##*:}"
             [ -f "$file" ] && sed -i "s/static inline ${func}(/static inline int ${func}(/" "$file" && echo "Patched: $file"
           done
@@ -224,7 +226,7 @@ EOF
                CLANG_TRIPLE=$CLANG_TRIPLE \
                CROSS_COMPILE=$CROSS_COMPILE \
                CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-               Image.gz-dtb dtbs 2>&1 | tee build.log
+               Image 2>&1 | tee build.log
           echo "--- Boot artifacts ---"
           ls -lh $OUT_DIR/arch/arm64/boot/
 
@@ -232,9 +234,9 @@ EOF
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
           # Copy kernel image (try multiple variants)
-          cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/" 2>/dev/null || \
-          cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/" 2>/dev/null || \
-          cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/"
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/Image" 2>/dev/null || \
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/Image" 2>/dev/null || \
+          cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/Image"
           # Copy dtbo if exists
           cp "$OUT_DIR/arch/arm64/boot/dtbo.img" "$ANYKERNEL_DIR/" 2>/dev/null || true
           cp "$OUT_DIR/arch/arm64/boot/dtbo"     "$ANYKERNEL_DIR/dtbo.img" 2>/dev/null || true
