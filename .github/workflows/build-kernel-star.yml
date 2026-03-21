@@ -127,6 +127,12 @@ jobs:
           # supercalls.c: TWA_RESUME not in 5.4
           [ -f drivers/kernelsu/supercalls.c ] && \
             sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/supercalls.c
+          # ksud.c: nofault variants not in 5.4
+          if [ -f drivers/kernelsu/ksud.c ]; then
+            sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/ksud.c
+            sed -i 's/copy_from_user_nofault/copy_from_user/g' drivers/kernelsu/ksud.c
+            sed -i 's/copy_to_user_nofault/copy_to_user/g' drivers/kernelsu/ksud.c
+          fi
           if [ -f drivers/kernelsu/sucompat.c ]; then
             sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c
             sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
