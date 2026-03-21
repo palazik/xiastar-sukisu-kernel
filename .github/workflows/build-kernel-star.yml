@@ -12,13 +12,13 @@ on:
         required: true
         default: 'twelve'
       USE_KPROBES:
-        description: 'Use kprobes hook (true = required for GKI 1.0)'
+        description: 'Use kprobes hook (false = manual, more stable)'
         required: true
-        default: 'true'
+        default: 'false'
         type: choice
         options:
-          - 'true'
           - 'false'
+          - 'true'
       DISABLE_REAR_DISPLAY:
         description: 'Disable rear (secondary) display in DTS'
         required: true
@@ -120,25 +120,17 @@ jobs:
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           DCFG="arch/arm64/configs/$DEFCONFIG"
-          if [ "${{ github.event.inputs.USE_KPROBES }}" = "true" ]; then
-            KPR="CONFIG_KSU_WITH_KPROBES=y
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y"
-          else
-            KPR="# CONFIG_KSU_WITH_KPROBES is not set"
-          fi
-          
-          if [ "${{ github.event.inputs.SELINUX_MODE }}" = "permissive" ]; then
-            SEL="CONFIG_SECURITY_SELINUX_BOOTPARAM=y"
-          else
-            SEL="# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set"
-          fi
-          
+          [ "${{ github.event.inputs.USE_KPROBES }}" = "true" ] \
+            && KPR="CONFIG_KSU_WITH_KPROBES=y" \
+            || KPR="# CONFIG_KSU_WITH_KPROBES is not set"
+          [ "${{ github.event.inputs.SELINUX_MODE }}" = "permissive" ] \
+            && SEL="CONFIG_SECURITY_SELINUX_BOOTPARAM=y" \
+            || SEL="# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set"
           printf '%s\n' \
             '' \
             '# ReSukiSU (SuSFS built-in)' \
             'CONFIG_KSU=y' \
+            'CONFIG_KSU_TP_HOOKS=n' \
             '# Branding' \
             'CONFIG_LOCALVERSION="-palaziks"' \
             'CONFIG_LOCALVERSION_AUTO=n' \
@@ -202,4 +194,3 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
           retention-days: 7
-
