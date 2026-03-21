@@ -100,7 +100,9 @@ jobs:
       - name: Fix techpack implicit-int (Clang compat)
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          for f in             "techpack/display/msm/sde/sde_hw_dsc_1_2.c:_dsc_subblk_offset"             "techpack/display/msm/sde/sde_hw_vdc.c:_vdc_subblk_offset"; do
+          for f in \
+            "techpack/display/msm/sde/sde_hw_dsc_1_2.c:_dsc_subblk_offset" \
+            "techpack/display/msm/sde/sde_hw_vdc.c:_vdc_subblk_offset"; do
             file="${f%%:*}"; func="${f##*:}"
             [ -f "$file" ] && sed -i "s/static inline ${func}(/static inline int ${func}(/" "$file" && echo "Patched: $file"
           done
@@ -126,13 +128,8 @@ jobs:
             sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c
             sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
           fi
-          # pkg_observer.c: fsnotify API incompatible with 5.4
-          # Replace with empty stub - non-critical (only tracks app installs for allowlist)
           if [ -f drivers/kernelsu/pkg_observer.c ]; then
-            echo "// pkg_observer stubbed for kernel-5.4" > drivers/kernelsu/pkg_observer.c
-            echo "#include <linux/kernel.h>" >> drivers/kernelsu/pkg_observer.c
-            echo "void ksu_pkg_observer_init(void) {}" >> drivers/kernelsu/pkg_observer.c
-            echo "void ksu_pkg_observer_exit(void) {}" >> drivers/kernelsu/pkg_observer.c
+            printf "// pkg_observer stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_pkg_observer_init(void) {}\nvoid ksu_pkg_observer_exit(void) {}\n" > drivers/kernelsu/pkg_observer.c
             echo "Stubbed: drivers/kernelsu/pkg_observer.c"
           fi
 
@@ -229,36 +226,20 @@ jobs:
       - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
-          cp $OUT_DIR/arch/arm64/boot/Image $ANYKERNEL_DIR/
+          # Copy kernel image (try multiple variants)
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/Image" 2>/dev/null || \
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/Image" 2>/dev/null || \
+          cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/Image"
+          # Copy dtbo if exists
+          cp "$OUT_DIR/arch/arm64/boot/dtbo.img" "$ANYKERNEL_DIR/" 2>/dev/null || true
+          cp "$OUT_DIR/arch/arm64/boot/dtbo"     "$ANYKERNEL_DIR/dtbo.img" 2>/dev/null || true
           SEL="${{ github.event.inputs.SELINUX_MODE }}"
-          printf '%s\n' \
-            '# AnyKernel3 Ramdisk Mod Script' \
-            '# osm0sis @ xda-developers' \
-            '' \
-            "properties() { '" \
-            "kernel.string=SukiSU-Ultra + SuSFS | star/mars | selinux=${SEL} | @palaziks" \
-            'do.devicecheck=1' \
-            'do.modules=0' \
-            'do.systemless=1' \
-            'do.cleanup=1' \
-            'do.cleanuponabort=0' \
-            'device.name1=star' \
-            'device.name2=mars' \
-            'device.name3=M2102K1G' \
-            'device.name4=M2102K1AC' \
-            'device.name5=M2102K1C' \
-            'supported.versions=12-14' \
-            "'; } # end properties" \
-            '' \
-            'block=boot;' \
-            'is_slot_device=1;' \
-            'ramdisk_compression=auto;' \
-            '' \
-            '. tools/ak3-core.sh;' \
-            '' \
-            'dump_boot;' \
-            'write_boot;' \
-          > $ANYKERNEL_DIR/anykernel.sh
+          printf "properties() { '\n" > $ANYKERNEL_DIR/anykernel.sh
+          printf "kernel.string=SukiSU-Ultra + SuSFS | star/mars | selinux=%s | @palaziks\n" "$SEL" >> $ANYKERNEL_DIR/anykernel.sh
+          printf "do.devicecheck=1\ndo.modules=0\ndo.systemless=1\ndo.cleanup=1\ndo.cleanuponabort=0\n" >> $ANYKERNEL_DIR/anykernel.sh
+          printf "device.name1=star\ndevice.name2=mars\ndevice.name3=M2102K1G\ndevice.name4=M2102K1AC\ndevice.name5=M2102K1C\n" >> $ANYKERNEL_DIR/anykernel.sh
+          printf "supported.versions=11-14\n'; }\n" >> $ANYKERNEL_DIR/anykernel.sh
+          printf "block=boot;\nis_slot_device=1;\nramdisk_compression=auto;\n. tools/ak3-core.sh;\ndump_boot;\nwrite_boot;\n" >> $ANYKERNEL_DIR/anykernel.sh
           BUILD_DATE=$(date +%Y%m%d-%H%M)
           ZIP_NAME="SukiSU_star-mars_${SEL}_${BUILD_DATE}_palaziks.zip"
           cd $ANYKERNEL_DIR && zip -r9 "${GITHUB_WORKSPACE}/${ZIP_NAME}" . -x "*.git*"
