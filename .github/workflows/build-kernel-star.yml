@@ -104,23 +104,6 @@ jobs:
         run: |
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-      - name: Apply SuSFS (1.4.2-kernel-5.4)
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          git clone --depth=1 -b 1.4.2-kernel-5.4 \
-            https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
-          PATCH="/tmp/susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch"
-          if [ -f "$PATCH" ]; then
-            patch -p1 --no-backup-if-mismatch < "$PATCH" || \
-            patch -p1 --no-backup-if-mismatch --fuzz=3 < "$PATCH" || \
-            patch -p1 --no-backup-if-mismatch --fuzz=6 --ignore-whitespace < "$PATCH" || \
-            echo "WARNING: SuSFS patch failed, continuing"
-          fi
-          cp /tmp/susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp /tmp/susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          cp /tmp/susfs4ksu/kernel_patches/fs/sus_su.c fs/ 2>/dev/null || true
-          cp /tmp/susfs4ksu/kernel_patches/include/linux/sus_su.h include/linux/ 2>/dev/null || true
-
       - name: Patch DTS (disable rear display)
         if: ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' }}
         working-directory: ${{ env.KERNEL_DIR }}
@@ -145,18 +128,8 @@ jobs:
             || SEL="# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set"
           printf '%s\n' \
             '' \
-            '# ReSukiSU + SuSFS 1.4.2' \
+            '# ReSukiSU (SuSFS built-in)' \
             'CONFIG_KSU=y' \
-            'CONFIG_KSU_SUSFS=y' \
-            'CONFIG_KSU_SUSFS_SUS_PATH=y' \
-            'CONFIG_KSU_SUSFS_SUS_MOUNT=y' \
-            'CONFIG_KSU_SUSFS_SUS_KSTAT=y' \
-            'CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y' \
-            'CONFIG_KSU_SUSFS_TRY_UMOUNT=y' \
-            'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' \
-            'CONFIG_KSU_SUSFS_ENABLE_LOG=y' \
-            'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' \
-            '# CONFIG_KSU_SUSFS_SUS_SU is not set' \
             '# Branding' \
             'CONFIG_LOCALVERSION="-palaziks"' \
             'CONFIG_LOCALVERSION_AUTO=n' \
