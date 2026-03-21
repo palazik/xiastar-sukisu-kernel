@@ -120,17 +120,17 @@ jobs:
           KSU="drivers/kernelsu"
           # --- Global sed across ALL .c files in kernelsu ---
           # TWA_RESUME not in 5.4
-          find $KSU -name "*.c" | xargs sed -i 's/TWA_RESUME/0/g'
+          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/TWA_RESUME/0/g'
           # nofault uaccess variants not in 5.4 (added in 5.8)
-          find $KSU -name "*.c" | xargs sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g'
-          find $KSU -name "*.c" | xargs sed -i 's/copy_from_user_nofault/copy_from_user/g'
-          find $KSU -name "*.c" | xargs sed -i 's/copy_to_user_nofault/copy_to_user/g'
+          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g'
+          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/copy_from_user_nofault/copy_from_user/g'
+          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/copy_to_user_nofault/copy_to_user/g'
           # security_inode_init_security_anon not in 5.4 (added in 5.9) - stub to 0
-          find $KSU -name "*.c" | xargs sed -i 's/security_inode_init_security_anon([^)]*)/0/g'
+          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/security_inode_init_security_anon([^)]*)/0/g'
           # pgtable.h not in 5.4
-          find $KSU -name "*.c" | xargs sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g'
+          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g'
           # seccomp.filter_count not in 5.4
-          find $KSU -name "*.c" | xargs sed -i '/seccomp\.filter_count/d'
+          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i '/seccomp\.filter_count/d'
           # allowlist.c: missing include for put_task_struct
           [ -f $KSU/allowlist.c ] && grep -q 'linux/sched/task.h' $KSU/allowlist.c || \
             sed -i '1s|^|#include <linux/sched/task.h>\n|' $KSU/allowlist.c
