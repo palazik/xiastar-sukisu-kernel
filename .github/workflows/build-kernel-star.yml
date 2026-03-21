@@ -11,14 +11,6 @@ on:
         description: 'Kernel source branch'
         required: true
         default: 'twelve'
-      SUSFS_BRANCH:
-        description: 'SuSFS branch (susfs4ksu)'
-        required: true
-        default: 'kernel-5.4'
-      SUKISU_TAG:
-        description: 'SukiSU Ultra tag (empty = latest main)'
-        required: false
-        default: ''
       USE_KPROBES:
         description: 'Use kprobes hook (false = manual, more stable)'
         required: true
@@ -46,7 +38,7 @@ on:
 
 jobs:
   build:
-    name: Build SukiSU Ultra Kernel (star/mars)
+    name: Build ReSukiSU Kernel (star/mars)
     runs-on: ubuntu-22.04
     env:
       ARCH: arm64
@@ -107,49 +99,16 @@ jobs:
             [ -f "$file" ] && sed -i "s/static inline ${func}(/static inline int ${func}(/" "$file" && echo "Patched: $file"
           done
 
-      - name: Integrate SukiSU Ultra
+      - name: Integrate ReSukiSU
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          TAG="${{ github.event.inputs.SUKISU_TAG }}"
-          [ -z "$TAG" ] && TAG="main"
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/${TAG}/kernel/setup.sh" | bash -s "$TAG"
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-      - name: Fix SukiSU for kernel-5.4
+      - name: Apply SuSFS (1.4.2-kernel-5.4)
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          KSU="drivers/kernelsu"
-          # --- Global sed across ALL .c files in kernelsu ---
-          # TWA_RESUME not in 5.4
-          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/TWA_RESUME/0/g'
-          # nofault uaccess variants not in 5.4 (added in 5.8)
-          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g'
-          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/copy_from_user_nofault/copy_from_user/g'
-          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/copy_to_user_nofault/copy_to_user/g'
-          # security_inode_init_security_anon not in 5.4 (added in 5.9) - stub to 0
-          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's/security_inode_init_security_anon([^)]*)/0/g'
-          # pgtable.h not in 5.4
-          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g'
-          # seccomp.filter_count not in 5.4
-          find -L $KSU -name "*.c" | xargs --no-run-if-empty sed -i '/seccomp\.filter_count/d'
-          # allowlist.c: missing include for put_task_struct
-          [ -f $KSU/allowlist.c ] && grep -q 'linux/sched/task.h' $KSU/allowlist.c || \
-            sed -i '1s|^|#include <linux/sched/task.h>\n|' $KSU/allowlist.c
-          # pkg_observer.c: fsnotify API incompatible with 5.4 - stub
-          [ -f $KSU/pkg_observer.c ] && \
-            printf "// pkg_observer stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_pkg_observer_init(void) {}\nvoid ksu_pkg_observer_exit(void) {}\n" > $KSU/pkg_observer.c
-          # setuid_hook.c: seccomp cache API not in 5.4 - stub
-          [ -f $KSU/setuid_hook.c ] && \
-            printf "// setuid_hook stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_setuid_hook_init(void) {}\nvoid ksu_setuid_hook_exit(void) {}\n" > $KSU/setuid_hook.c
-          echo "SukiSU 5.4 compat fixes applied"
-
-
-      - name: Apply SuSFS
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          # Pin to 1.4.2-kernel-5.4 - latest stable tag for 5.4, ignore SUSFS_BRANCH input
           git clone --depth=1 -b 1.4.2-kernel-5.4 \
             https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
-          # Apply only the single main patch - NOT a glob loop (avoids reversed patch chaos)
           PATCH="/tmp/susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch"
           if [ -f "$PATCH" ]; then
             patch -p1 --no-backup-if-mismatch < "$PATCH" || \
@@ -157,7 +116,6 @@ jobs:
             patch -p1 --no-backup-if-mismatch --fuzz=6 --ignore-whitespace < "$PATCH" || \
             echo "WARNING: SuSFS patch failed, continuing"
           fi
-          # Copy source files directly
           cp /tmp/susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp /tmp/susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp /tmp/susfs4ksu/kernel_patches/fs/sus_su.c fs/ 2>/dev/null || true
@@ -187,7 +145,7 @@ jobs:
             || SEL="# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set"
           printf '%s\n' \
             '' \
-            '# SukiSU Ultra + SuSFS 1.4.2' \
+            '# ReSukiSU + SuSFS 1.4.2' \
             'CONFIG_KSU=y' \
             'CONFIG_KSU_SUSFS=y' \
             'CONFIG_KSU_SUSFS_SUS_PATH=y' \
@@ -245,13 +203,13 @@ jobs:
           cp "$OUT_DIR/arch/arm64/boot/dtbo"     "$ANYKERNEL_DIR/dtbo.img" 2>/dev/null || true
           SEL="${{ github.event.inputs.SELINUX_MODE }}"
           printf "properties() { '\n" > $ANYKERNEL_DIR/anykernel.sh
-          printf "kernel.string=SukiSU-Ultra + SuSFS | star/mars | selinux=%s | @palaziks\n" "$SEL" >> $ANYKERNEL_DIR/anykernel.sh
+          printf "kernel.string=ReSukiSU + SuSFS | star/mars | selinux=%s | @palaziks\n" "$SEL" >> $ANYKERNEL_DIR/anykernel.sh
           printf "do.devicecheck=1\ndo.modules=0\ndo.systemless=1\ndo.cleanup=1\ndo.cleanuponabort=0\n" >> $ANYKERNEL_DIR/anykernel.sh
           printf "device.name1=star\ndevice.name2=mars\ndevice.name3=M2102K1G\ndevice.name4=M2102K1AC\ndevice.name5=M2102K1C\n" >> $ANYKERNEL_DIR/anykernel.sh
           printf "supported.versions=11-14\n'; }\n" >> $ANYKERNEL_DIR/anykernel.sh
           printf "block=boot;\nis_slot_device=1;\nramdisk_compression=auto;\n. tools/ak3-core.sh;\ndump_boot;\nwrite_boot;\n" >> $ANYKERNEL_DIR/anykernel.sh
           BUILD_DATE=$(date +%Y%m%d-%H%M)
-          ZIP_NAME="SukiSU_star-mars_${SEL}_${BUILD_DATE}_palaziks.zip"
+          ZIP_NAME="ReSukiSU_star-mars_${SEL}_${BUILD_DATE}_palaziks.zip"
           cd $ANYKERNEL_DIR && zip -r9 "${GITHUB_WORKSPACE}/${ZIP_NAME}" . -x "*.git*"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "ZIP size: $(du -sh ${GITHUB_WORKSPACE}/${ZIP_NAME} | cut -f1)"
