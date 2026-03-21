@@ -12,13 +12,13 @@ on:
         required: true
         default: 'twelve'
       USE_KPROBES:
-        description: 'Use kprobes hook (false = manual, more stable)'
+        description: 'Use kprobes hook (true = required for GKI 1.0)'
         required: true
-        default: 'false'
+        default: 'true'
         type: choice
         options:
-          - 'false'
           - 'true'
+          - 'false'
       DISABLE_REAR_DISPLAY:
         description: 'Disable rear (secondary) display in DTS'
         required: true
@@ -193,3 +193,4 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
           retention-days: 7
+
