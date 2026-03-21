@@ -120,12 +120,21 @@ jobs:
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           DCFG="arch/arm64/configs/$DEFCONFIG"
-          [ "${{ github.event.inputs.USE_KPROBES }}" = "true" ] \
-            && KPR="CONFIG_KSU_WITH_KPROBES=y" \
-            || KPR="# CONFIG_KSU_WITH_KPROBES is not set"
-          [ "${{ github.event.inputs.SELINUX_MODE }}" = "permissive" ] \
-            && SEL="CONFIG_SECURITY_SELINUX_BOOTPARAM=y" \
-            || SEL="# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set"
+          if [ "${{ github.event.inputs.USE_KPROBES }}" = "true" ]; then
+            KPR="CONFIG_KSU_WITH_KPROBES=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y"
+          else
+            KPR="# CONFIG_KSU_WITH_KPROBES is not set"
+          fi
+          
+          if [ "${{ github.event.inputs.SELINUX_MODE }}" = "permissive" ]; then
+            SEL="CONFIG_SECURITY_SELINUX_BOOTPARAM=y"
+          else
+            SEL="# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set"
+          fi
+          
           printf '%s\n' \
             '' \
             '# ReSukiSU (SuSFS built-in)' \
