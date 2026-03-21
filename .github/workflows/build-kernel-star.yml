@@ -117,36 +117,31 @@ jobs:
       - name: Fix SukiSU for kernel-5.4
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          if [ -f drivers/kernelsu/allowlist.c ]; then
-            sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/allowlist.c
-            grep -q 'linux/sched/task.h' drivers/kernelsu/allowlist.c || \
-              sed -i '1s|^|#include <linux/sched/task.h>\n|' drivers/kernelsu/allowlist.c
-          fi
-          [ -f drivers/kernelsu/app_profile.c ] && \
-            sed -i '/seccomp\.filter_count/d' drivers/kernelsu/app_profile.c
-          # supercalls.c: TWA_RESUME not in 5.4
-          [ -f drivers/kernelsu/supercalls.c ] && \
-            sed -i 's/TWA_RESUME/0/g' drivers/kernelsu/supercalls.c
-          # ksud.c: nofault variants not in 5.4
-          if [ -f drivers/kernelsu/ksud.c ]; then
-            sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/ksud.c
-            sed -i 's/copy_from_user_nofault/copy_from_user/g' drivers/kernelsu/ksud.c
-            sed -i 's/copy_to_user_nofault/copy_to_user/g' drivers/kernelsu/ksud.c
-          fi
-          if [ -f drivers/kernelsu/sucompat.c ]; then
-            sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c
-            sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
-          fi
-          # pkg_observer.c: fsnotify API incompatible with 5.4
-          if [ -f drivers/kernelsu/pkg_observer.c ]; then
-            printf "// pkg_observer stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_pkg_observer_init(void) {}\nvoid ksu_pkg_observer_exit(void) {}\n" > drivers/kernelsu/pkg_observer.c
-            echo "Stubbed: drivers/kernelsu/pkg_observer.c"
-          fi
-          # setuid_hook.c: ksu_seccomp_allow_cache not available in 5.4
-          if [ -f drivers/kernelsu/setuid_hook.c ]; then
-            printf "// setuid_hook stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_setuid_hook_init(void) {}\nvoid ksu_setuid_hook_exit(void) {}\n" > drivers/kernelsu/setuid_hook.c
-            echo "Stubbed: drivers/kernelsu/setuid_hook.c"
-          fi
+          KSU="drivers/kernelsu"
+          # --- Global sed across ALL .c files in kernelsu ---
+          # TWA_RESUME not in 5.4
+          find $KSU -name "*.c" | xargs sed -i 's/TWA_RESUME/0/g'
+          # nofault uaccess variants not in 5.4 (added in 5.8)
+          find $KSU -name "*.c" | xargs sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g'
+          find $KSU -name "*.c" | xargs sed -i 's/copy_from_user_nofault/copy_from_user/g'
+          find $KSU -name "*.c" | xargs sed -i 's/copy_to_user_nofault/copy_to_user/g'
+          # security_inode_init_security_anon not in 5.4 (added in 5.9) - stub to 0
+          find $KSU -name "*.c" | xargs sed -i 's/security_inode_init_security_anon([^)]*)/0/g'
+          # pgtable.h not in 5.4
+          find $KSU -name "*.c" | xargs sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g'
+          # seccomp.filter_count not in 5.4
+          find $KSU -name "*.c" | xargs sed -i '/seccomp\.filter_count/d'
+          # allowlist.c: missing include for put_task_struct
+          [ -f $KSU/allowlist.c ] && grep -q 'linux/sched/task.h' $KSU/allowlist.c || \
+            sed -i '1s|^|#include <linux/sched/task.h>\n|' $KSU/allowlist.c
+          # pkg_observer.c: fsnotify API incompatible with 5.4 - stub
+          [ -f $KSU/pkg_observer.c ] && \
+            printf "// pkg_observer stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_pkg_observer_init(void) {}\nvoid ksu_pkg_observer_exit(void) {}\n" > $KSU/pkg_observer.c
+          # setuid_hook.c: seccomp cache API not in 5.4 - stub
+          [ -f $KSU/setuid_hook.c ] && \
+            printf "// setuid_hook stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_setuid_hook_init(void) {}\nvoid ksu_setuid_hook_exit(void) {}\n" > $KSU/setuid_hook.c
+          echo "SukiSU 5.4 compat fixes applied"
+
 
       - name: Apply SuSFS
         working-directory: ${{ env.KERNEL_DIR }}
