@@ -107,6 +107,9 @@ if [ -f drivers/kernelsu/sucompat.c ]; then
     sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c
     sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
 fi
+# Fix setuid_hook.c seccomp cache error
+[ -f drivers/kernelsu/setuid_hook.c ] && \
+    sed -i 's/ksu_seccomp_allow_cache/\/\/ ksu_seccomp_allow_cache/g' drivers/kernelsu/setuid_hook.c
 # pkg_observer.c: fsnotify API incompatible with 5.4 (replace with empty stub)
 if [ -f drivers/kernelsu/pkg_observer.c ]; then
     cat > drivers/kernelsu/pkg_observer.c << 'EOF'
@@ -132,14 +135,10 @@ cp /tmp/susfs4ksu/kernel_patches/*.patch . 2>/dev/null
 # Apply patches with fuzz tolerance
 for patch_file in *.patch; do
     log_info "Applying: $patch_file"
-    if patch -p1 --no-backup-if-mismatch < "$patch_file"; then
-        log_ok "Patch applied: $patch_file"
-    elif patch -p1 --no-backup-if-mismatch --fuzz=3 < "$patch_file"; then
-        log_warn "Patch applied with fuzz: $patch_file"
-    else
+    patch -p1 --no-backup-if-mismatch --fuzz=3 --forward --batch < "$patch_file" || {
         log_error "Patch failed: $patch_file"
         exit 1
-    fi
+    }
 done
 
 # Copy susfs source files
@@ -318,7 +317,7 @@ make O="$OUT_DIR" ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
 
 # Step 2: resolve any new/unset symbols non-interactively
 # Prevents LTO_CLANG "NEW symbol" interactive prompt
-make O="$OUT_DIR" ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
+yes "" | make O="$OUT_DIR" ARCH=$ARCH CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
      CROSS_COMPILE=$CROSS_COMPILE olddefconfig
 
 # Step 3: build kernel image
@@ -329,7 +328,7 @@ make -j"$(nproc --all)" \
      CLANG_TRIPLE=$CLANG_TRIPLE \
      CROSS_COMPILE=$CROSS_COMPILE \
      CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-     Image.gz-dtb 2>&1 | tee "$LOG_DIR/build.log"
+     Image 2>&1 | tee "$LOG_DIR/build.log"
 
 log_ok "Build complete."
 ls -lh "$OUT_DIR/arch/arm64/boot/"
