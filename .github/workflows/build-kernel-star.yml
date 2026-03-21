@@ -128,15 +128,11 @@ jobs:
             sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c
             sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
           fi
-          # Fix setuid_hook.c seccomp cache error
-          [ -f drivers/kernelsu/setuid_hook.c ] && \
+          if [ -f drivers/kernelsu/setuid_hook.c ]; then
             sed -i 's/ksu_seccomp_allow_cache/\/\/ ksu_seccomp_allow_cache/g' drivers/kernelsu/setuid_hook.c
-          # Stub pkg_observer
+          fi
           if [ -f drivers/kernelsu/pkg_observer.c ]; then
-            echo "// pkg_observer stubbed for kernel-5.4" > drivers/kernelsu/pkg_observer.c
-            echo "#include <linux/kernel.h>" >> drivers/kernelsu/pkg_observer.c
-            echo "void ksu_pkg_observer_init(void) {}" >> drivers/kernelsu/pkg_observer.c
-            echo "void ksu_pkg_observer_exit(void) {}" >> drivers/kernelsu/pkg_observer.c
+            printf "// pkg_observer stubbed for kernel-5.4\n#include <linux/kernel.h>\nvoid ksu_pkg_observer_init(void) {}\nvoid ksu_pkg_observer_exit(void) {}\n" > drivers/kernelsu/pkg_observer.c
             echo "Stubbed: drivers/kernelsu/pkg_observer.c"
           fi
 
@@ -145,8 +141,7 @@ jobs:
         run: |
           git clone --depth=1 -b ${{ github.event.inputs.SUSFS_BRANCH }} \
             https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
-          cp /tmp/susfs4ksu/kernel_patches/add_susfs_in_kernel-5.4.patch . 2>/dev/null || \
-            cp /tmp/susfs4ksu/kernel_patches/*.patch . 2>/dev/null
+          cp /tmp/susfs4ksu/kernel_patches/*5.4*.patch . 2>/dev/null || true
           for p in *.patch; do
             patch -p1 --no-backup-if-mismatch --fuzz=3 --forward --batch < "$p" || echo "WARNING: $p failed, continuing"
           done
@@ -230,22 +225,19 @@ jobs:
       - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
-          # Copy kernel image (try multiple variants)
           cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/Image" 2>/dev/null || \
           cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/Image" 2>/dev/null || \
           cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/Image"
-          # Copy dtbo if exists
           cp "$OUT_DIR/arch/arm64/boot/dtbo.img" "$ANYKERNEL_DIR/" 2>/dev/null || true
           cp "$OUT_DIR/arch/arm64/boot/dtbo"     "$ANYKERNEL_DIR/dtbo.img" 2>/dev/null || true
           SEL="${{ github.event.inputs.SELINUX_MODE }}"
-          # Use printf with hex for quotes to avoid YAML syntax issues
-          Q="'"
-          printf "properties() { ${Q}\n" > $ANYKERNEL_DIR/anykernel.sh
+          # Create anykernel.sh using printf to avoid syntax highlighting errors
+          printf "properties() { '\n" > $ANYKERNEL_DIR/anykernel.sh
           printf "kernel.string=SukiSU-Ultra + SuSFS | star/mars | selinux=%s | @palaziks\n" "$SEL" >> $ANYKERNEL_DIR/anykernel.sh
           printf "do.devicecheck=1\ndo.modules=0\ndo.systemless=1\ndo.cleanup=1\ndo.cleanuponabort=0\n" >> $ANYKERNEL_DIR/anykernel.sh
           printf "device.name1=star\ndevice.name2=mars\ndevice.name3=M2102K1G\ndevice.name4=M2102K1AC\ndevice.name5=M2102K1C\n" >> $ANYKERNEL_DIR/anykernel.sh
           printf "supported.versions=11-14\n" >> $ANYKERNEL_DIR/anykernel.sh
-          printf "${Q}; } # end properties\n\n" >> $ANYKERNEL_DIR/anykernel.sh
+          printf "'; } # end properties\n\n" >> $ANYKERNEL_DIR/anykernel.sh
           printf "block=boot;\nis_slot_device=1;\nramdisk_compression=auto;\n\n. tools/ak3-core.sh;\n\ndump_boot;\nwrite_boot;\n" >> $ANYKERNEL_DIR/anykernel.sh
           BUILD_DATE=$(date +%Y%m%d-%H%M)
           ZIP_NAME="SukiSU_star-mars_${SEL}_${BUILD_DATE}_palaziks.zip"

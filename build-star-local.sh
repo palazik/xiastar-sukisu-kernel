@@ -107,9 +107,9 @@ if [ -f drivers/kernelsu/sucompat.c ]; then
     sed -i 's|<linux/pgtable.h>|<asm/pgtable.h>|g' drivers/kernelsu/sucompat.c
     sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' drivers/kernelsu/sucompat.c
 fi
-# Fix setuid_hook.c seccomp cache error
-[ -f drivers/kernelsu/setuid_hook.c ] && \
+if [ -f drivers/kernelsu/setuid_hook.c ]; then
     sed -i 's/ksu_seccomp_allow_cache/\/\/ ksu_seccomp_allow_cache/g' drivers/kernelsu/setuid_hook.c
+fi
 # pkg_observer.c: fsnotify API incompatible with 5.4 (replace with empty stub)
 if [ -f drivers/kernelsu/pkg_observer.c ]; then
     cat > drivers/kernelsu/pkg_observer.c << 'EOF'
@@ -128,9 +128,7 @@ git clone --depth=1 -b "$SUSFS_BRANCH" \
     https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
 
 cd "$KERNEL_DIR"
-# Copy patch files
-cp /tmp/susfs4ksu/kernel_patches/add_susfs_in_kernel-*.patch . 2>/dev/null || \
-cp /tmp/susfs4ksu/kernel_patches/*.patch . 2>/dev/null
+cp /tmp/susfs4ksu/kernel_patches/*5.4*.patch . 2>/dev/null || true
 
 # Apply patches with fuzz tolerance
 for patch_file in *.patch; do
@@ -193,16 +191,8 @@ log_ok "Defconfig prepared."
 if $DISABLE_REAR_DISPLAY; then
     log_info "Disabling rear (secondary) display in DTS..."
 
-    # ── Strategy 1: remove qcom,dsi-display-active from secondary display node
-    # The secondary (rear) display node in lahaina star DTS is typically named
-    # something like dsi_display1 / sde_dsi_display1 / sub_display.
-    # We search all DTS files and strip the active marker from non-primary nodes.
-
     DTS_SEARCH_DIR="$KERNEL_DIR/arch/arm64/boot/dts/qcom"
 
-    # Find the secondary display node file (star-specific SDE display dtsi)
-    # MiCode star-r-oss puts the secondary display in lahaina-sde-display.dtsi
-    # or star-sde-display.dtsi — handle both
     for dtsi_file in \
         "$DTS_SEARCH_DIR/lahaina-sde-display.dtsi" \
         "$DTS_SEARCH_DIR/star-sde-display.dtsi" \
@@ -210,13 +200,10 @@ if $DISABLE_REAR_DISPLAY; then
         if [ -f "$dtsi_file" ]; then
             log_info "Found display dtsi: $dtsi_file"
 
-            # Count how many display nodes have qcom,dsi-display-active
             ACTIVE_COUNT=$(grep -c "qcom,dsi-display-active" "$dtsi_file" || true)
             log_info "Found $ACTIVE_COUNT active display nodes"
 
             if [ "$ACTIVE_COUNT" -gt 1 ]; then
-                # Keep only the FIRST occurrence (primary), remove all others
-                # Mark secondary nodes by removing their active flag
                 python3 - "$dtsi_file" << 'PYEOF'
 import re, sys
 
@@ -224,10 +211,6 @@ path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
-# Find all blocks that contain qcom,dsi-display-active
-# Remove the property from all blocks where qcom,display-type = "secondary"
-# Pattern: within a node block containing display-type = "secondary",
-#          delete the qcom,dsi-display-active line
 modified = re.sub(
     r'(qcom,display-type\s*=\s*"secondary"[^}]*?)(^\s*qcom,dsi-display-active;\n)',
     r'\1',
@@ -241,7 +224,6 @@ if modified != content:
     print(f"[OK] Removed qcom,dsi-display-active from secondary display node")
 else:
     print("[WARN] Pattern not matched — trying fallback line-based approach")
-    # Fallback: comment out second occurrence of qcom,dsi-display-active
     lines = content.split('\n')
     found = 0
     out = []
@@ -262,16 +244,12 @@ PYEOF
         fi
     done
 
-    # ── Strategy 2: in the board-level DTS, add /delete-property/ or status = "disabled"
-    # for the secondary display node overlay
     for board_dts in \
         "$DTS_SEARCH_DIR/lahaina-star.dts" \
         "$DTS_SEARCH_DIR/lahaina-star-v2.dts" \
         "$DTS_SEARCH_DIR/lahaina-star-v2-overlay.dts"; do
         if [ -f "$board_dts" ]; then
             log_info "Patching board DTS: $board_dts"
-            # Inject override at end of file before closing brace
-            # to disable the secondary/rear SDE display node
             cat >> "$board_dts" << 'DTSEOF'
 
 /* ── Rear display disabled by build script ── */
@@ -286,8 +264,6 @@ DTSEOF
         fi
     done
 
-    # ── Strategy 3: defconfig — remove secondary display framebuffer support
-    # (belt-and-suspenders: even if DTS still references it, driver won't init it)
     echo "# CONFIG_DRM_MSM_DSI_PLL is not set" >> \
         "$KERNEL_DIR/arch/arm64/configs/$DEFCONFIG" 2>/dev/null || true
 
