@@ -6,11 +6,11 @@ on:
       KERNEL_SOURCE:
         description: 'Kernel source repo'
         required: true
-        default: 'pa-markakash/kernel_xiaomi_sm8350'
+        default: 'MiCode/Xiaomi_Kernel_OpenSource'
       KERNEL_BRANCH:
         description: 'Kernel source branch'
         required: true
-        default: 'twelve'
+        default: 'star-r-oss'
       USE_KPROBES:
         description: 'Use kprobes hook (false = manual, more stable)'
         required: true
