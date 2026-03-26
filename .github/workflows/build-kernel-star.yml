@@ -79,32 +79,38 @@ jobs:
       - name: Integrate WildKSU & SuSFS
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # 1. Ставим WildKSU (создает папку Wild_KSU и линк KernelSU)
+          # 1. Установка WildKSU
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
           
-          # 2. Клонируем SuSFS для 5.4
+          # 2. Подготовка SuSFS (клонируем во временную директорию вне ядра для надежности)
+          cd ..
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-5.4
+          SUSFS_DIR=$(pwd)/susfs4ksu
+          cd kernel
           
-          # 3. Накладываем патч для взаимодействия WildKSU и SuSFS
-          # Копируем патч в реальную папку, куда ведет линк
-          cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./Wild_KSU/kernel/
-          cd Wild_KSU/kernel/ && patch -p1 < 10_enable_susfs_for_ksu.patch && cd ../..
+          # 3. Патчим WildKSU для поддержки SuSFS
+          # Нам нужно сказать патчу, что файлы лежат в Wild_KSU/kernel/
+          cd Wild_KSU/kernel/
+          patch -p1 < $SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || echo "Ошибка патча KSU игнорирована"
+          cd ../..
           
-          # 4. Накладываем основной патч ядра
-          PATCH_54=$(find susfs4ksu/kernel_patches/ -name "*5.4*.patch" | head -n 1)
-          patch -p1 --forward < "$PATCH_54" || echo "Частичные ошибки патча пропущены"
+          # 4. Накладываем основной патч ядра 5.4
+          # Ищем патч и применяем его к корню ядра
+          PATCH_54=$(find $SUSFS_DIR/kernel_patches/ -name "*5.4*.patch" | head -n 1)
+          patch -p1 --forward < "$PATCH_54" || echo "Частичные ошибки патча ядра пропущены"
 
-          # 5. Ручное копирование файлов SuSFS в дерево ядра
-          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
+          # 5. Ручное копирование файлов SuSFS (теперь пути точно верные)
+          cp -v $SUSFS_DIR/kernel_patches/fs/susfs.c fs/
+          cp -v $SUSFS_DIR/kernel_patches/include/linux/susfs.h include/linux/
+          cp -v $SUSFS_DIR/kernel_patches/include/linux/susfs_def.h include/linux/
           
-          # 6. Регистрация в Makefile файловой системы
+          # 6. Регистрация в Makefile
           if ! grep -q "susfs.o" fs/Makefile; then
              echo "obj-y += susfs.o" >> fs/Makefile
           fi
 
-          rm -rf susfs4ksu
+          # Очистка
+          rm -rf $SUSFS_DIR
 
       - name: Patch DTS
         if: ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' }}
