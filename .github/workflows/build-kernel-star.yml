@@ -1,4 +1,4 @@
-name: Build Kernel - Mi 11 Ultra/Pro (Unified star/mars)
+name: Build Kernel - Mi 11 Ultra/Pro (WildKSU + SuSFS)
 
 on:
   workflow_dispatch:
@@ -11,193 +11,124 @@ on:
         description: 'Kernel source branch'
         required: true
         default: 'twelve'
-      USE_KPROBES:
-        description: 'Use kprobes hook (false = manual, more stable)'
-        required: true
-        default: 'true'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
-      DISABLE_REAR_DISPLAY:
-        description: 'Disable rear (secondary) display in DTS'
-        required: true
-        default: 'true'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-      SELINUX_MODE:
-        description: 'SELinux mode'
-        required: true
-        default: 'enforcing'
-        type: choice
-        options:
-          - 'enforcing'
-          - 'permissive'
 
 jobs:
   build:
-    name: Build ReSukiSU Kernel (star/mars)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     env:
       ARCH: arm64
-      SUBARCH: arm64
       TC_DIR: ${{ github.workspace }}/toolchain
       KERNEL_DIR: ${{ github.workspace }}/kernel
-      ANYKERNEL_DIR: ${{ github.workspace }}/anykernel
       OUT_DIR: ${{ github.workspace }}/out
+      ANYKERNEL_DIR: ${{ github.workspace }}/anykernel
 
     steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
-          sudo apt-get clean
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Set up Swap (16GB)
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
+
+      - name: Install dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ca-certificates curl flex git \
+          sudo apt update
+          sudo apt install -y --no-install-recommends \
+            bc bison build-essential curl flex git gnupg \
             libelf-dev libssl-dev lld llvm make python3 \
-            unzip wget zip zlib1g-dev
+            tar perl lz4 jq zip unzip wget
 
-      - name: Clone Clang toolchain (v15)
+      - name: Clone Clang Toolchain (v15)
         run: |
           mkdir -p $TC_DIR
           CLANG_URL=$(curl -s https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-15-link.txt)
           wget -q "$CLANG_URL" -O $TC_DIR/clang.tar.gz
           tar -xf $TC_DIR/clang.tar.gz -C $TC_DIR
-          rm $TC_DIR/clang.tar.gz
           echo "$TC_DIR/bin" >> $GITHUB_PATH
 
-      - name: Clone kernel source
+      - name: Clone Kernel Source
         run: |
-          git clone --depth=1 \
-            -b ${{ github.event.inputs.KERNEL_BRANCH }} \
-            https://github.com/${{ github.event.inputs.KERNEL_SOURCE }}.git \
-            $KERNEL_DIR
+          git clone --depth=1 -b ${{ github.event.inputs.KERNEL_BRANCH }} \
+            https://github.com/${{ github.event.inputs.KERNEL_SOURCE }}.git $KERNEL_DIR
 
-      - name: Detect defconfig
+      - name: Detect Defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          # Ищем любой файл, который заканчивается на star_defconfig или mars_defconfig
-          # в директории arch/arm64/configs/
           CONF=$(find arch/arm64/configs/ -name "*star*_defconfig" -o -name "*mars*_defconfig" | head -n 1)
-          
           if [ -n "$CONF" ]; then
-            # Убираем лишний путь, оставляя только относительный от arch/arm64/configs/
             DEFCONFIG=$(echo "$CONF" | sed 's|arch/arm64/configs/||')
             echo "DEFCONFIG=$DEFCONFIG" >> $GITHUB_ENV
-            echo "Found defconfig: $DEFCONFIG"
+            echo "Found: $DEFCONFIG"
           else
-            echo "ERROR: No star or mars defconfig found!"
-            ls -R arch/arm64/configs/
-            exit 1
+            echo "ERROR: Defconfig not found!" && exit 1
           fi
 
-      - name: Fix techpack implicit-int (Clang compat)
+      - name: Integrate WildKSU & SuSFS
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          for f in \
-            "techpack/display/msm/sde/sde_hw_dsc_1_2.c:_dsc_subblk_offset" \
-            "techpack/display/msm/sde/sde_hw_vdc.c:_vdc_subblk_offset"; do
-            file="${f%%:*}"; func="${f##*:}"
-            [ -f "$file" ] && sed -i "s/static inline ${func}(/static inline int ${func}(/" "$file" && echo "Patched: $file"
-          done
-
-      - name: Integrate ReSukiSU
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-
-      - name: Patch DTS (disable rear display)
-        if: ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' }}
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          DTS_PATH="arch/arm64/boot/dts/qcom"
-          find $DTS_PATH -name "*star*.dts" -o -name "*mars*.dts" | while read f; do
-            printf '\n/* rear display disabled by palaziks build */\n' >> "$f"
-            printf '&sde_dsi1 { status = "disabled"; };\n' >> "$f"
-            printf '&dsi_display1 { /delete-property/ qcom,dsi-display-active; };\n' >> "$f"
-            echo "Patched DTS: $f"
-          done
+          # WildKSU
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
+          
+          # SuSFS (для ядра 5.4 нужны другие патчи, чем для 6.6)
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-5.4
+          
+          # Накладываем патч SuSFS для 5.4
+          # (Пути к патчам могут отличаться, подбираем самый подходящий)
+          PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*5.4*.patch" | head -n 1)
+          if [ -f "$PATCH_FILE" ]; then
+            patch -p1 < "$PATCH_FILE"
+          fi
+          
+          # Копируем файлы SuSFS
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
+          rm -rf susfs4ksu
 
       - name: Configure Kconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           DCFG="arch/arm64/configs/$DEFCONFIG"
-          [ "${{ github.event.inputs.USE_KPROBES }}" = "true" ] \
-            && KPR="CONFIG_KSU_WITH_KPROBES=y" \
-            || KPR="# CONFIG_KSU_WITH_KPROBES is not set"
-          [ "${{ github.event.inputs.SELINUX_MODE }}" = "permissive" ] \
-            && SEL="CONFIG_SECURITY_SELINUX_BOOTPARAM=y" \
-            || SEL="# CONFIG_SECURITY_SELINUX_BOOTPARAM is not set"
-          printf '%s\n' \
-            '' \
-            '# ReSukiSU (SuSFS built-in)' \
-            'CONFIG_KSU=y' \
-            'CONFIG_KSU_TP_HOOKS=n' \
-            '# Branding' \
-            'CONFIG_LOCALVERSION="-palaziks"' \
-            'CONFIG_LOCALVERSION_AUTO=n' \
-            'CONFIG_LTO_NONE=y' \
-            '# CONFIG_LTO_CLANG is not set' \
-            "$KPR" \
-            "$SEL" \
-          >> "$DCFG"
+          cat >> "$DCFG" << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_WILD_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_LOCALVERSION="-palaziks-wild"
+          CONFIG_LTO_NONE=y
+          EOF
 
-      - name: Build
+      - name: Build Kernel
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           mkdir -p $OUT_DIR
-          export CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm
-          export OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KBUILD_BUILD_USER="palaziks"
-          export KBUILD_BUILD_HOST="github"
-          make O=$OUT_DIR ARCH=$ARCH CC=$CC \
-               CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE \
-               $DEFCONFIG
-          make O=$OUT_DIR ARCH=$ARCH CC=$CC \
-               CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE \
-               olddefconfig
-          make -j$(nproc --all) O=$OUT_DIR ARCH=$ARCH \
-               CC=$CC LD=$LD AR=$AR NM=$NM \
-               OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
-               CLANG_TRIPLE=$CLANG_TRIPLE \
-               CROSS_COMPILE=$CROSS_COMPILE \
-               CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 \
-               Image 2>&1 | tee build.log
-          echo "--- Boot artifacts ---"
-          ls -lh $OUT_DIR/arch/arm64/boot/
+          make O=$OUT_DIR ARCH=arm64 CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            $DEFCONFIG
+          
+          make -j$(nproc --all) O=$OUT_DIR ARCH=arm64 CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            Image.gz-dtb
 
       - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
-          cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" "$ANYKERNEL_DIR/Image" 2>/dev/null || \
-          cp "$OUT_DIR/arch/arm64/boot/Image.gz"     "$ANYKERNEL_DIR/Image" 2>/dev/null || \
-          cp "$OUT_DIR/arch/arm64/boot/Image"        "$ANYKERNEL_DIR/Image"
-          cp "$OUT_DIR/arch/arm64/boot/dtbo.img" "$ANYKERNEL_DIR/" 2>/dev/null || \
-          cp "$OUT_DIR/arch/arm64/boot/dtbo"     "$ANYKERNEL_DIR/dtbo.img" 2>/dev/null || true
-          SEL="${{ github.event.inputs.SELINUX_MODE }}"
-          printf "properties() { '\n" > $ANYKERNEL_DIR/anykernel.sh
-          printf "kernel.string=ReSukiSU + SuSFS | star/mars | selinux=%s | @palaziks\n" "$SEL" >> $ANYKERNEL_DIR/anykernel.sh
-          printf "do.devicecheck=1\ndo.modules=0\ndo.systemless=1\ndo.cleanup=1\ndo.cleanuponabort=0\n" >> $ANYKERNEL_DIR/anykernel.sh
-          printf "device.name1=star\ndevice.name2=mars\ndevice.name3=M2102K1G\ndevice.name4=M2102K1AC\ndevice.name5=M2102K1C\n" >> $ANYKERNEL_DIR/anykernel.sh
-          printf "supported.versions=11-14\n'; }\n" >> $ANYKERNEL_DIR/anykernel.sh
-          printf "block=boot;\nis_slot_device=1;\nramdisk_compression=auto;\n. tools/ak3-core.sh;\ndump_boot;\nwrite_boot;\n" >> $ANYKERNEL_DIR/anykernel.sh
-          BUILD_DATE=$(date +%Y%m%d-%H%M)
-          ZIP_NAME="ReSukiSU_star-mars_${SEL}_${BUILD_DATE}_palaziks.zip"
-          cd $ANYKERNEL_DIR && zip -r9 "${GITHUB_WORKSPACE}/${ZIP_NAME}" . -x "*.git*"
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          echo "ZIP size: $(du -sh ${GITHUB_WORKSPACE}/${ZIP_NAME} | cut -f1)"
+          cp $OUT_DIR/arch/arm64/boot/Image.gz-dtb $ANYKERNEL_DIR/Image
+          # Настройка скрипта
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' $ANYKERNEL_DIR/anykernel.sh
+          cd $ANYKERNEL_DIR && zip -r9 ../kernel-build.zip ./*
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
-          retention-days: 7
+          name: WildKSU-SuSFS-Mi11-Kernel
+          path: kernel-build.zip
