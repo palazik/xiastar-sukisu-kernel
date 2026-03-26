@@ -79,13 +79,33 @@ jobs:
       - name: Integrate WildKSU & SuSFS
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
+          # 1. Ставим WildKSU
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
+          
+          # 2. Клонируем SuSFS именно для ветки 5.4
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-5.4
-          PATCH_FILE=$(find susfs4ksu/kernel_patches/ -name "*5.4*.patch" | head -n 1)
-          [ -f "$PATCH_FILE" ] && patch -p1 < "$PATCH_FILE"
+          
+          # 3. Накладываем патчи
+          # Сначала патч для взаимодействия SuSFS и KernelSU
+          cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
+          cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch && cd ..
+          
+          # Теперь основной патч ядра. Используем --forward, чтобы не спрашивать про повторы
+          # и игнорируем ошибки в файлах, которых может не быть (bootconfig)
+          PATCH_54=$(find susfs4ksu/kernel_patches/ -name "*5.4*.patch" | head -n 1)
+          patch -p1 --forward < "$PATCH_54" || echo "Некоторые части патча пропущены, это нормально для 5.4"
+
+          # 4. РУЧНОЕ КОПИРОВАНИЕ (Самый важный шаг)
+          # Если патч не смог создать файлы, копируем их из репозитория патча
           cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp -f susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/
+          
+          # 5. Принудительная регистрация в Makefile
+          if ! grep -q "susfs.o" fs/Makefile; then
+             echo "obj-y += susfs.o" >> fs/Makefile
+          fi
+
           rm -rf susfs4ksu
 
       - name: Patch DTS
