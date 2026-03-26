@@ -92,8 +92,8 @@ jobs:
 
           # 3. Патчим WildKSU для поддержки SuSFS
           # Заходим в реальную директорию WildKSU, чтобы патч нашел ksu.c
-          cd Wild_KSU/kernel/
-          patch -p1 < "$SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || echo "Патч KSU уже применен или возникла ошибка"
+          cd Wild_KSU/
+          patch -p1 < "$SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || echo "Ошибка применения патча KSU"
           cd ../..
           
           # 4. Накладываем основной патч SuSFS на дерево ядра (5.4)
