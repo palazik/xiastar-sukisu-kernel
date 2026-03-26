@@ -81,13 +81,20 @@ jobs:
       - name: Detect defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          for cfg in vendor/star-qgki_defconfig vendor/lahaina-qgki_defconfig star_defconfig mars_defconfig; do
+          for cfg in \
+            vendor/star-qgki_defconfig \
+            vendor/lahaina-qgki_defconfig \
+            star_user_defconfig \
+            star_defconfig \
+            mars_defconfig; do
             if [ -f "arch/arm64/configs/$cfg" ]; then
               echo "DEFCONFIG=$cfg" >> $GITHUB_ENV
-              echo "Found: $cfg"
+              echo "Found defconfig: $cfg"
               break
             fi
           done
+          # Fail early if nothing found
+          grep -q DEFCONFIG $GITHUB_ENV || (echo "ERROR: no defconfig found!" && ls arch/arm64/configs/ && exit 1)
 
       - name: Fix techpack implicit-int (Clang compat)
         working-directory: ${{ env.KERNEL_DIR }}
