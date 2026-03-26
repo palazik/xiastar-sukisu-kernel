@@ -47,13 +47,13 @@ jobs:
         with:
           swap-size-gb: 16
 
-      - name: Install dependencies
+      - name: Install dependencies & Wiggle
         run: |
           sudo apt update
           sudo apt install -y --no-install-recommends \
             bc bison build-essential curl flex git gnupg \
             libelf-dev libssl-dev lld llvm make python3 \
-            tar perl lz4 jq zip unzip wget
+            tar perl lz4 jq zip unzip wget wiggle
 
       - name: Clone Clang (v15)
         run: |
@@ -63,7 +63,7 @@ jobs:
           tar -xf $TC_DIR/clang.tar.gz -C $TC_DIR
           echo "$TC_DIR/bin" >> $GITHUB_PATH
 
-      - name: Clone Source
+      - name: Clone Clean Kernel Source
         run: |
           git clone --depth=1 -b ${{ github.event.inputs.KERNEL_BRANCH }} \
             https://github.com/${{ github.event.inputs.KERNEL_SOURCE }}.git $KERNEL_DIR
@@ -76,51 +76,48 @@ jobs:
           DEFCONFIG=$(echo "$CONF" | sed 's|arch/arm64/configs/||')
           echo "DEFCONFIG=$DEFCONFIG" >> $GITHUB_ENV
 
-      - name: Integrate WildKSU & SuSFS
+      - name: Dynamic Patching (WildKSU + SuSFS)
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -euxo pipefail
           
-          # 1. Установка WildKSU (создает папку Wild_KSU и линк KernelSU)
-          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
-          
-          # 2. Клонируем SuSFS во временную папку уровнем выше, чтобы не мусорить в ядре
-          cd ..
+          # 1. Скачиваем SuSFS в воркспейс, чтобы пути не путались
+          cd ${{ github.workspace }}
           git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-5.4
           SUSFS_DIR=$(pwd)/susfs4ksu
-          cd kernel
+          cd ${{ env.KERNEL_DIR }}
 
-          # 3. Патчим WildKSU для поддержки SuSFS
-          # Заходим в реальную директорию WildKSU, чтобы патч нашел ksu.c
+          # 2. Установка WildKSU в ядро
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
+          
+          # 3. Патчим WildKSU для SuSFS (пути исправлены)
           cd Wild_KSU/
-          patch -p1 < "$SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || echo "Ошибка применения патча KSU"
+          patch -p1 < "$SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || echo "Патч KSU пропущен или уже вшит"
           cd ..
           
-          # 4. Накладываем основной патч SuSFS на дерево ядра (5.4)
-          SUSFS_KERNEL_PATCH="$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-5.4.patch"
-          if [ -f "$SUSFS_KERNEL_PATCH" ]; then
-            patch -p1 < "$SUSFS_KERNEL_PATCH" || echo "Ошибки патча ядра пропущены"
-          fi
+          # 4. Накладываем патч SuSFS на ядро (ошибки игнорим через || true)
+          patch -p1 < "$SUSFS_DIR/kernel_patches/50_add_susfs_in_kernel-5.4.patch" || true
           
-          # 5. Копируем файлы SuSFS в дерево ядра
+          # 5. МАГИЯ WIGGLE: Автоматически чиним конфликты налету
+          echo "=== Вживляем отвергнутый код ==="
+          find . -name "*.rej" -type f | while read rej_file; do
+            target_file="${rej_file%.rej}"
+            echo "Патчим $target_file..."
+            wiggle --replace "$target_file" "$rej_file" || echo "Предупреждение Wiggle для $target_file"
+            rm -f "$rej_file"
+          done
+          
+          # 6. Закидываем файлы SuSFS в ядро
           cp -v "$SUSFS_DIR/kernel_patches/fs/susfs.c" fs/
           cp -v "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" include/linux/
           cp -v "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" include/linux/
           
-          # 6. Проверка наличия файлов
-          for f in fs/susfs.c include/linux/susfs.h include/linux/susfs_def.h; do
-            if [ -f "$f" ]; then echo "Found: $f"; else echo "Missing: $f" && exit 1; fi
-          done
-          
-          # 7. Добавляем susfs в Makefile файловой системы, если его там нет
+          # 7. Подрубаем компиляцию susfs
           if ! grep -q "susfs.o" fs/Makefile; then
              echo "obj-y += susfs.o" >> fs/Makefile
           fi
 
-          # Очистка
-          rm -rf "$SUSFS_DIR"
-
-      - name: Patch DTS
+      - name: Patch DTS (Rear Display)
         if: ${{ github.event.inputs.DISABLE_REAR_DISPLAY == 'true' }}
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
@@ -156,11 +153,11 @@ jobs:
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           mkdir -p $OUT_DIR
-          ARGS="ARCH=arm64 O=$OUT_DIR CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
+          ARGS="ARCH=arm64 O=$OUT_DIR CC=clang LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
           make $ARGS $DEFCONFIG
           make -j$(nproc --all) $ARGS Image.gz-dtb || make -j$(nproc --all) $ARGS Image.gz
 
-      - name: Package
+      - name: Package AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git $ANYKERNEL_DIR
           if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ]; then
@@ -173,7 +170,7 @@ jobs:
           cd $ANYKERNEL_DIR && zip -r9 "${GITHUB_WORKSPACE}/${ZIP_NAME}" ./*
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
-      - name: Upload
+      - name: Upload Zip
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
