@@ -1,15 +1,24 @@
 name: Compile Advanced Android Kernel (Proton Clang)
 
-# Конфигурация триггеров: запуск при пуше в ветку main или ручной запуск
+# Trigger configuration: manual launch only
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      device_config:
+        description: 'Select the defconfig for the target device'
+        required: true
+        default: 'star-qgki_defconfig'
+        type: choice
+        options:
+          - star-qgki_defconfig
+          - mars_defconfig
+          - renoir-qgki_defconfig
+          - odin-qgki_defconfig
 
 jobs:
   build-kernel:
     name: Compilation Core
-    runs-on: ubuntu-24.04 # Использование новейшей среды Ubuntu
+    runs-on: ubuntu-24.04 # Using the latest Ubuntu environment
     
     steps:
       - name: Checkout Repository Configuration
@@ -19,13 +28,13 @@ jobs:
           submodules: recursive
 
       - name: Dynamic Memory Allocation (Swap Provisioning)
-        # Критически важный шаг для предотвращения OOM Killer при работе LTO
+        # Critical step to prevent OOM Killer during LTO operations
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 16
 
       - name: Provision Host Dependencies
-        # Установка полного стека зависимостей для сборки, рекомендуемых Proton Clang
+        # Installing the full stack of build dependencies recommended by Proton Clang
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -36,15 +45,17 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
 
       - name: Initialize and Execute Build Matrix
+        env:
+          # Passing the selected defconfig from GitHub Actions to the script
+          DEVICE_CONFIG: ${{ inputs.device_config }}
         run: |
           chmod +x build_kernel.sh
           ./build_kernel.sh
 
       - name: Archive and Publish Artifacts
-        # Создание артефакта, содержащего готовый к прошивке ZIP-файл AnyKernel3
+        # Creating an artifact containing the flashable AnyKernel3 ZIP file
         uses: actions/upload-artifact@v4
         with:
-          name: Proton-Optimized-Kernel
+          name: Proton-Kernel-${{ inputs.device_config }}
           path: "*.zip"
           retention-days: 14
-          
