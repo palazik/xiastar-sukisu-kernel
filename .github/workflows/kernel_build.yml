@@ -1,0 +1,50 @@
+name: Compile Advanced Android Kernel (Proton Clang)
+
+# Конфигурация триггеров: запуск при пуше в ветку main или ручной запуск
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    name: Compilation Core
+    runs-on: ubuntu-24.04 # Использование новейшей среды Ubuntu
+    
+    steps:
+      - name: Checkout Repository Configuration
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Dynamic Memory Allocation (Swap Provisioning)
+        # Критически важный шаг для предотвращения OOM Killer при работе LTO
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
+
+      - name: Provision Host Dependencies
+        # Установка полного стека зависимостей для сборки, рекомендуемых Proton Clang
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bc bison build-essential curl flex gcc g++ git libelf-dev libssl-dev \
+            make ninja-build python3 u-boot-tools xz-utils zlib1g-dev \
+            lld llvm wget zip unzip jq tar
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+      - name: Initialize and Execute Build Matrix
+        run: |
+          chmod +x build_kernel.sh
+         ./build_kernel.sh
+
+      - name: Archive and Publish Artifacts
+        # Создание артефакта, содержащего готовый к прошивке ZIP-файл AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: Proton-Optimized-Kernel
+          path: "*.zip"
+          retention-days: 14
+          
