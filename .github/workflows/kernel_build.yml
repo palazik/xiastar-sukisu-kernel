@@ -18,7 +18,7 @@ on:
 jobs:
   build-kernel:
     name: Compilation Core
-    runs-on: ubuntu-24.04 # Using the latest Ubuntu environment
+    runs-on: ubuntu-22.04 # Using the latest Ubuntu environment
     
     steps:
       - name: Checkout Repository Configuration
