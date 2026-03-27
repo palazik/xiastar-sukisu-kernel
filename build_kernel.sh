@@ -23,17 +23,17 @@ CORES="$(nproc --all)"
 
 echo "[1/6] Клонирование репозиториев и инструментария..."
 # Поверхностное клонирование Proton Clang для минимизации сетевого трафика
-if; then
+if [ ! -d "${TOOLCHAIN_DIR}" ]; then
     git clone --depth=1 https://github.com/kdrag0n/proton-clang.git "${TOOLCHAIN_DIR}"
 fi
 
 # Клонирование шаблонного упаковщика AnyKernel3
-if; then
+if [ ! -d "${ANYKERNEL_DIR}" ]; then
     git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "${ANYKERNEL_DIR}"
 fi
 
 # Предполагается, что исходный код ядра уже находится в директории kernel_source
-if; then
+if [ ! -d "${KERNEL_DIR}" ]; then
     echo "Ошибка: Директория исходного кода ядра (${KERNEL_DIR}) не обнаружена."
     exit 1
 fi
@@ -57,34 +57,23 @@ cd "${KERNEL_DIR}"
 if grep -q "1 / 0" include/uapi/asm-generic/mman.h 2>/dev/null; then
     echo "  -> Патчинг asm-generic/mman.h..."
     sed -i 's|1 / 0|0|g' include/uapi/asm-generic/mman.h
-    sed -i 's|1 / 0|0|g' arch/arm64/include/uapi/asm/mman.h 2>/dev/null |
-
-| true
+    sed -i 's|1 / 0|0|g' arch/arm64/include/uapi/asm/mman.h 2>/dev/null || true
 fi
 
 # 3.2. Восстановление синтаксиса KABI после внедрения патчей SuSFS
-# Автоматические утилиты слияния часто оставляют '>>>>>>> replacement' в файле mount.h,
-# если поля susfs_mnt_id_backup конфликтуют с модификациями производителя (например, Xiaomi).
+# Автоматические утилиты слияния часто оставляют '>>>>>>> replacement' в файле mount.h
 if [ -f "include/linux/mount.h" ]; then
     echo "  -> Валидация синтаксиса include/linux/mount.h..."
     # Удаление невалидных строковых маркеров конфликта git/wiggle
-    sed -i '/>>>>>>> replacement/d' include/linux/mount.h 2>/dev/null |
-
-| true
-    sed -i '/======/d' include/linux/mount.h 2>/dev/null |
-
-| true
+    sed -i '/>>>>>>> replacement/d' include/linux/mount.h 2>/dev/null || true
+    sed -i '/======/d' include/linux/mount.h 2>/dev/null || true
     # Адаптация резервных полей ANDROID_KABI_USE
-    sed -i '/ANDROID_KABI_USE(4, u64 susfs_mnt_id_backup);/d' include/linux/mount.h 2>/dev/null |
-
-| true
+    sed -i '/ANDROID_KABI_USE(4, u64 susfs_mnt_id_backup);/d' include/linux/mount.h 2>/dev/null || true
 fi
 
 # 3.3. Включение модуля SuSFS в сборочный граф, если он был скопирован
-if grep -q "susfs.c" fs/Makefile 2>/dev/null |
-
-| [ -f "fs/susfs.c" ]; then
-    if! grep -q "susfs.o" fs/Makefile; then
+if grep -q "susfs.c" fs/Makefile 2>/dev/null || [ -f "fs/susfs.c" ]; then
+    if ! grep -q "susfs.o" fs/Makefile; then
         echo "obj-y += susfs.o" >> fs/Makefile
     fi
 fi
@@ -93,7 +82,7 @@ echo "[4/6] Инициализация конфигурации Kbuild..."
 # Полная очистка дерева исходников и артефактов старых сборок
 make O="${OUT_DIR}" ARCH="${ARCH}" mrproper
 
-# Создание файла.config на основе конфигурации производителя
+# Создание файла .config на основе конфигурации производителя
 make O="${OUT_DIR}" ARCH="${ARCH}" CC="${CC}" \
     CROSS_COMPILE="${CROSS_COMPILE}" \
     CROSS_COMPILE_COMPAT="${CROSS_COMPILE_COMPAT}" \
@@ -102,8 +91,6 @@ make O="${OUT_DIR}" ARCH="${ARCH}" CC="${CC}" \
 
 echo "[5/6] Старт многопоточной компиляции (LLVM/LTO)..."
 # Вызов системы сборки с полным делегированием полномочий LLVM инструментарию
-# LLVM=1 активирует ld.lld, llvm-ar, llvm-objcopy
-# LLVM_IAS=1 активирует встроенный ассемблер Clang
 make -j"${CORES}" O="${OUT_DIR}" ARCH="${ARCH}" CC="${CC}" \
     CROSS_COMPILE="${CROSS_COMPILE}" \
     CROSS_COMPILE_COMPAT="${CROSS_COMPILE_COMPAT}" \
@@ -112,7 +99,7 @@ make -j"${CORES}" O="${OUT_DIR}" ARCH="${ARCH}" CC="${CC}" \
 
 # Проверка наличия собранного ядра
 COMPILED_IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
-if; then
+if [ ! -f "${COMPILED_IMAGE}" ]; then
     echo "Критическая ошибка: Файл Image не сгенерирован. Изучите логи компилятора."
     exit 1
 fi
@@ -124,19 +111,15 @@ rm -rf "${ANYKERNEL_DIR}/Image" "${ANYKERNEL_DIR}/Image.gz" "${ANYKERNEL_DIR}/dt
 
 # Интеграция бинарных артефактов в шаблон упаковщика
 cp "${COMPILED_IMAGE}" "${ANYKERNEL_DIR}/"
-cp "${KERNEL_DIR}/out/arch/arm64/boot/dtbo.img" "${ANYKERNEL_DIR}/" 2>/dev/null |
-
-| true
+cp "${KERNEL_DIR}/out/arch/arm64/boot/dtbo.img" "${ANYKERNEL_DIR}/" 2>/dev/null || true
 # Поиск и перенос всех собранных файлов Device Tree Blob (dtb)
-find "${KERNEL_DIR}/out/arch/arm64/boot/dts/vendor/" -name "*.dtb" -exec cp {} "${ANYKERNEL_DIR}/dtb/" \; 2>/dev/null |
-
-| true
+find "${KERNEL_DIR}/out/arch/arm64/boot/dts/vendor/" -name "*.dtb" -exec cp {} "${ANYKERNEL_DIR}/dtb/" \; 2>/dev/null || true
 
 cd "${ANYKERNEL_DIR}"
 ZIP_FILENAME="${KERNEL_VERSION}-${TIMESTAMP}.zip"
-zip -r9 "${ZIP_FILENAME}" * -x.git README.md *placeholder
+zip -r9 "${ZIP_FILENAME}" * -x .git README.md *placeholder
 
 mv "${ZIP_FILENAME}" "${WORKSPACE_DIR}/"
 echo "================================================="
-echo " Building finished. File: ${ZIP_FILENAME} "
+echo " Building finished!. File: ${ZIP_FILENAME} "
 echo "================================================="
