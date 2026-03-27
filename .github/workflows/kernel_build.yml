@@ -38,7 +38,7 @@ jobs:
       - name: Initialize and Execute Build Matrix
         run: |
           chmod +x build_kernel.sh
-         ./build_kernel.sh
+          ./build_kernel.sh
 
       - name: Archive and Publish Artifacts
         # Создание артефакта, содержащего готовый к прошивке ZIP-файл AnyKernel3
