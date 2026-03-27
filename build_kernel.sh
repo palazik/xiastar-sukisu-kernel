@@ -24,20 +24,23 @@ CORES="$(nproc --all)"
 DEFCONFIG_FILE="${DEVICE_CONFIG:-star-qgki_defconfig}"
 
 echo "[1/6] Cloning repositories and toolchain..."
+
+# Clone the kernel source tree
+if [ ! -d "${KERNEL_DIR}" ]; then
+    echo "  -> Cloning kernel_xiaomi_mars (branch: twelve)..."
+    git clone --depth=1 https://github.com/palazik/kernel_xiaomi_mars.git -b twelve "${KERNEL_DIR}"
+fi
+
 # Shallow clone of Proton Clang to minimize network traffic
 if [ ! -d "${TOOLCHAIN_DIR}" ]; then
+    echo "  -> Cloning Proton Clang..."
     git clone --depth=1 https://github.com/kdrag0n/proton-clang.git "${TOOLCHAIN_DIR}"
 fi
 
 # Clone the AnyKernel3 template packager
 if [ ! -d "${ANYKERNEL_DIR}" ]; then
+    echo "  -> Cloning AnyKernel3..."
     git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "${ANYKERNEL_DIR}"
-fi
-
-# Assuming the kernel source code is already in the kernel_source directory
-if [ ! -d "${KERNEL_DIR}" ]; then
-    echo "Error: Kernel source directory (${KERNEL_DIR}) not found."
-    exit 1
 fi
 
 echo "[2/6] Exporting environment variables (Kbuild Compiler Directives)..."
